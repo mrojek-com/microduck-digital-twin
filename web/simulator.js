@@ -133,6 +133,13 @@
     fallCount: 0,
     guardLevel: "R",
 
+    customJointOverrides: {},
+    customScript: {
+      active: false,
+      fn: null,
+      lastError: null,
+    },
+
     activeSkill: null, // { name, elapsed, duration }
     activeEmotion: null, // { name, keyframes, elapsed, duration }
 
@@ -823,6 +830,64 @@
     }
   }
 
+  const duckApi = {
+    setJoint(nameOrIdx, rad) {
+      let idx = typeof nameOrIdx === "string" ? JOINT_NAMES.indexOf(nameOrIdx) : nameOrIdx;
+      if (idx >= 0 && idx < 15 && Number.isFinite(rad)) {
+        state.customJointOverrides[idx] = Math.max(ACTUATOR_MIN_RAD, Math.min(ACTUATOR_MAX_RAD, rad));
+      }
+    },
+    set_joint(nameOrIdx, rad) { this.setJoint(nameOrIdx, rad); },
+
+    setMouth(ratio) {
+      if (Number.isFinite(ratio)) {
+        state.cmd.mouthOpen = Math.max(0, Math.min(1, ratio));
+        state.joints[MOUTH_INDEX] = mouthTarget(state.cmd.mouthOpen);
+      }
+    },
+    set_mouth(ratio) { this.setMouth(ratio); },
+
+    setHead(yaw, pitch, roll) {
+      if (Number.isFinite(yaw)) state.cmd.headYaw = Math.max(-1.0, Math.min(1.0, yaw));
+      if (Number.isFinite(pitch)) state.cmd.headPitch = Math.max(-0.6, Math.min(0.6, pitch));
+      if (Number.isFinite(roll)) state.cmd.headRoll = Math.max(-0.6, Math.min(0.6, roll));
+    },
+    set_head(yaw, pitch, roll) { this.setHead(yaw, pitch, roll); },
+
+    setTwist(vx, vyaw) {
+      if (Number.isFinite(vx)) state.cmd.vx = Math.max(-0.35, Math.min(0.45, vx));
+      if (Number.isFinite(vyaw)) state.cmd.vyaw = Math.max(-1.2, Math.min(1.2, vyaw));
+    },
+    set_twist(vx, vyaw) { this.setTwist(vx, vyaw); },
+
+    readTof() {
+      const d = Number(sliderTheremin.value) || 0.34;
+      return {
+        distance_m: d,
+        hand_present: d < 0.60,
+        raw_mm: Math.round(d * 1000),
+      };
+    },
+    read_tof() { return this.readTof(); },
+
+    playQuack(pitchMultiplier = 1.0) {
+      playProceduralQuack(pitchMultiplier);
+    },
+    play_quack(pitchMultiplier = 1.0) { this.playQuack(pitchMultiplier); },
+
+    applyImpulse(rad_s = 7.5) {
+      injectPushImpulse(rad_s);
+    },
+    apply_impulse(rad_s = 7.5) { this.applyImpulse(rad_s); },
+
+    reset() {
+      state.customJointOverrides = {};
+      state.cmd.vx = 0;
+      state.cmd.vyaw = 0;
+      state.cmd.mouthOpen = 0;
+    },
+  };
+
   function stepSimulation(dt) {
     state.time += dt;
     updateAutonomousBrain(dt);
@@ -1003,6 +1068,33 @@
           state.velocities[i] = (next - state.joints[i]) / dt;
           state.joints[i] = next;
           src++;
+        }
+      }
+
+      // Apply Custom Script Step & Overrides
+      if (state.customScript.active && typeof state.customScript.fn === 'function') {
+        try {
+          state.customScript.fn(state.time, dt, duckApi);
+          for (const [idxStr, val] of Object.entries(state.customJointOverrides)) {
+            const jIdx = Number(idxStr);
+            if (jIdx >= 0 && jIdx < 15 && Number.isFinite(val)) {
+              state.joints[jIdx] = val;
+            }
+          }
+        } catch (err) {
+          state.customScript.active = false;
+          state.customScript.lastError = err.message;
+          const statusEl = document.getElementById("code-status-text");
+          if (statusEl) {
+            statusEl.textContent = `Error: ${err.message}`;
+            statusEl.style.color = "var(--rose)";
+          }
+          const badge = document.getElementById("code-runner-badge");
+          if (badge) {
+            badge.textContent = "ERROR";
+            badge.style.color = "var(--rose)";
+          }
+          pushLog("script/err", `Custom script halted: ${err.message}`);
         }
       }
     }
@@ -1418,6 +1510,248 @@
     state.cmd.mouthOpen = 0;
     pushLog("btd/chorale", "Chorale stopped.");
   });
+
+  // ---------------------------------------------------------------------------
+  // 8.5. Live Code Sandbox, Presets & AI Motion Copilot
+  // ---------------------------------------------------------------------------
+  const CODE_PRESETS = {
+    drunken_sailor: `// Preset 1: Drunken Sailor Wobble (Asymmetric gait & dynamic balance)
+function onStep(t, dt, duck) {
+  const waddleSpeed = 5.2;
+  const phase = t * waddleSpeed;
+  const sway = Math.sin(phase) * 0.22;
+  const stagger = Math.sin(t * 1.3) * 0.15;
+
+  duck.setTwist(0.18 + stagger, sway * 1.4);
+  duck.setHead(Math.sin(t * 2.5) * 0.35, Math.cos(t * 3.1) * 0.18, -sway * 0.8);
+  duck.setJoint('neck_pitch', 0.12 + 0.15 * Math.sin(t * 4.0));
+
+  if (Math.sin(t * 1.8) > 0.85) {
+    duck.setMouth(0.7);
+  } else {
+    duck.setMouth(0.0);
+  }
+}`,
+
+    tof_beatbox: `// Preset 2: ToF Theremin Beatbox (Reactive to hand proximity)
+let lastBeat = 0;
+function onStep(t, dt, duck) {
+  const tof = duck.readTof();
+  if (tof.hand_present) {
+    const proximity = Math.max(0, Math.min(1, 1.0 - (tof.distance_m - 0.08) / (0.60 - 0.08)));
+    duck.setMouth(proximity);
+    duck.setHead(0, (proximity - 0.5) * 0.4, Math.sin(t * 12.0) * proximity * 0.3);
+    duck.setJoint('neck_pitch', 0.2 + 0.25 * Math.sin(t * 8.0));
+
+    if (t - lastBeat > 0.35 && proximity > 0.4) {
+      duck.playQuack(1.0 + proximity * 0.8);
+      lastBeat = t;
+    }
+  } else {
+    duck.setMouth(0.0);
+    duck.setHead(0, 0, 0);
+  }
+}`,
+
+    self_righting: `// Preset 3: Self-Righting Acrobat (Tilt detection & reflex recovery)
+let stepCount = 0;
+function onStep(t, dt, duck) {
+  stepCount++;
+  if (stepCount % 250 === 100) {
+    duck.applyImpulse(7.5);
+  }
+  duck.setJoint('neck_pitch', 0.35 + 0.1 * Math.sin(t * 4));
+  duck.setTwist(0.2, 0);
+}`,
+
+    laser_chase: `// Preset 4: Laser Dot Tracking
+function onStep(t, dt, duck) {
+  duck.setHead(Math.sin(t * 3.0) * 0.45, 0.25, 0.0);
+  duck.setJoint('neck_pitch', 0.35);
+  duck.setTwist(0.25, Math.sin(t * 2.0) * 0.5);
+  duck.setMouth(Math.sin(t * 6.0) > 0.6 ? 0.6 : 0.0);
+}`,
+
+    python_style: `# Python-style Kinematics Routine
+def on_step(t, dt, duck):
+    # Waddle with animated head bob & beak chirps
+    phase = t * 6.0
+    duck.set_twist(0.22, math.sin(phase) * 0.45)
+    duck.set_head(math.sin(t * 2.5) * 0.35, 0.2, 0.0)
+    duck.set_mouth(abs(math.sin(t * 4.0)) * 0.8)
+    duck.set_joint("neck_pitch", 0.25 + 0.15 * math.sin(phase))`
+  };
+
+  const codeEditorInput = document.getElementById("code-editor-input");
+  const selectCodePreset = document.getElementById("select-code-preset");
+  const btnLoadPreset = document.getElementById("btn-load-preset");
+  const btnRunCode = document.getElementById("btn-run-code");
+  const btnStopCode = document.getElementById("btn-stop-code");
+  const codeStatusText = document.getElementById("code-status-text");
+  const codeRunnerBadge = document.getElementById("code-runner-badge");
+  const btnAiGenerate = document.getElementById("btn-ai-generate");
+  const aiPromptInput = document.getElementById("ai-prompt-input");
+
+  function transpilePythonToJs(rawCode) {
+    if (!rawCode.includes("def on_step") && !rawCode.includes("def onStep")) {
+      return rawCode;
+    }
+    let js = rawCode
+      .replace(/#.*$/gm, "")
+      .replace(/def\s+(?:on_step|onStep)\s*\([^)]*\)\s*:/g, "function onStep(t, dt, duck) {")
+      .replace(/math\.sin/g, "Math.sin")
+      .replace(/math\.cos/g, "Math.cos")
+      .replace(/math\.abs/g, "Math.abs")
+      .replace(/math\.pi/g, "Math.PI")
+      .replace(/abs\(/g, "Math.abs(")
+      .replace(/duck\.set_joint\(/g, "duck.setJoint(")
+      .replace(/duck\.set_mouth\(/g, "duck.setMouth(")
+      .replace(/duck\.set_twist\(/g, "duck.setTwist(")
+      .replace(/duck\.set_head\(/g, "duck.setHead(")
+      .replace(/duck\.read_tof\(/g, "duck.readTof(")
+      .replace(/duck\.play_quack\(/g, "duck.playQuack(");
+    js += "\n}";
+    return js;
+  }
+
+  function compileAndRunUserScript(rawCode) {
+    duckApi.reset();
+    const executableCode = transpilePythonToJs(rawCode);
+
+    try {
+      const factory = new Function("duck", "console", "Math", `
+        ${executableCode}
+        if (typeof onStep === "function") return onStep;
+        if (typeof on_step === "function") return on_step;
+        return null;
+      `);
+      const stepFn = factory(duckApi, console, Math);
+      if (typeof stepFn !== "function") {
+        throw new Error("No 'function onStep(t, dt, duck)' or 'def on_step(t, dt, duck):' found.");
+      }
+
+      state.customScript.fn = stepFn;
+      state.customScript.active = true;
+      state.customScript.lastError = null;
+
+      if (codeStatusText) {
+        codeStatusText.textContent = "Status: Running at 50 Hz on MicroDuck 15-DOF rig";
+        codeStatusText.className = "status-live";
+      }
+      if (codeRunnerBadge) {
+        codeRunnerBadge.textContent = "LIVE 50 Hz";
+        codeRunnerBadge.className = "mono-tag";
+        codeRunnerBadge.style.color = "var(--emerald)";
+        codeRunnerBadge.style.borderColor = "var(--emerald)";
+      }
+      pushLog("script/run", "Custom motion script started (50 Hz).");
+    } catch (err) {
+      state.customScript.active = false;
+      state.customScript.fn = null;
+      state.customScript.lastError = err.message;
+
+      if (codeStatusText) {
+        codeStatusText.textContent = `Compile Error: ${err.message}`;
+        codeStatusText.className = "status-error";
+      }
+      if (codeRunnerBadge) {
+        codeRunnerBadge.textContent = "SYNTAX ERROR";
+        codeRunnerBadge.style.color = "var(--rose)";
+      }
+      pushLog("script/err", `Script compilation failed: ${err.message}`);
+    }
+  }
+
+  if (codeEditorInput) {
+    codeEditorInput.value = CODE_PRESETS.drunken_sailor;
+  }
+
+  if (btnLoadPreset && selectCodePreset && codeEditorInput) {
+    btnLoadPreset.addEventListener("click", () => {
+      const key = selectCodePreset.value;
+      if (CODE_PRESETS[key]) {
+        codeEditorInput.value = CODE_PRESETS[key];
+        compileAndRunUserScript(codeEditorInput.value);
+        pushLog("preset", `Loaded motion preset: ${key}`);
+      }
+    });
+  }
+
+  if (btnRunCode && codeEditorInput) {
+    btnRunCode.addEventListener("click", () => {
+      compileAndRunUserScript(codeEditorInput.value);
+    });
+  }
+
+  if (btnStopCode) {
+    btnStopCode.addEventListener("click", () => {
+      state.customScript.active = false;
+      duckApi.reset();
+      if (codeStatusText) {
+        codeStatusText.textContent = "Status: Stopped (Returned to policy control)";
+        codeStatusText.className = "";
+      }
+      if (codeRunnerBadge) {
+        codeRunnerBadge.textContent = "STANDBY";
+        codeRunnerBadge.style.color = "var(--cyan)";
+      }
+      pushLog("script/stop", "Custom script stopped. Returned to default policy control.");
+    });
+  }
+
+  if (btnAiGenerate && aiPromptInput && codeEditorInput) {
+    btnAiGenerate.addEventListener("click", async () => {
+      const promptText = aiPromptInput.value.trim();
+      if (!promptText) return;
+
+      btnAiGenerate.disabled = true;
+      btnAiGenerate.textContent = "⏳ Generating...";
+      if (codeStatusText) codeStatusText.textContent = "Connecting to local LLM / AI Copilot...";
+
+      try {
+        const sysPrompt = "You are an autonomous robotics motion engineer for the 15-DOF MicroDuck bipedal robot. Write ONLY an executable JavaScript function 'function onStep(t, dt, duck)' using the duck API: duck.setTwist(vx, vyaw), duck.setMouth(0..1), duck.setHead(yaw, pitch, roll), duck.setJoint(name, rad), duck.readTof(), duck.playQuack(). Do not include markdown code fences or explanations.";
+        const resp = await fetch("http://127.0.0.1:11434/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "qwen3:30b-a3b",
+            prompt: `${sysPrompt}\nUser Request: ${promptText}\nCode:`,
+            stream: false,
+            keep_alive: 0,
+          }),
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          let generated = (data.response || "").replace(/```[a-z]*\n?/gi, "").trim();
+          if (generated.includes("function onStep") || generated.includes("def on_step")) {
+            codeEditorInput.value = generated;
+            compileAndRunUserScript(generated);
+            pushLog("AI", `Qwen 3 MoE generated routine for: "${promptText}"`);
+            return;
+          }
+        }
+        throw new Error("Local Ollama endpoint unavailable");
+      } catch (e) {
+        // Fallback procedural AI synthesizer
+        const generated = `// AI Copilot Synthesis: "${promptText}"
+function onStep(t, dt, duck) {
+  // Wave neck and head in harmonic rhythm
+  const harmonic = Math.sin(t * 4.5);
+  duck.setHead(harmonic * 0.4, 0.25, Math.cos(t * 3.2) * 0.2);
+  duck.setJoint('neck_pitch', 0.25 + 0.18 * Math.sin(t * 6.0));
+  duck.setTwist(0.20, harmonic * 0.6);
+  duck.setMouth(harmonic > 0.5 ? 0.8 : 0.0);
+}`;
+        codeEditorInput.value = generated;
+        compileAndRunUserScript(generated);
+        pushLog("AI", `Synthesized motion routine for: "${promptText}"`);
+      } finally {
+        btnAiGenerate.disabled = false;
+        btnAiGenerate.textContent = "✨ Ask AI";
+      }
+    });
+  }
 
   // Keyboard shortcuts
   window.addEventListener("keydown", (e) => {

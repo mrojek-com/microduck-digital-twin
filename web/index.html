@@ -192,6 +192,48 @@
         </div>
       </article>
 
+      <!-- LIVE MOTION LAB & AI COPILOT CARD -->
+      <article class="card">
+        <div class="card-header">
+          <h2>Live Code Lab &amp; AI Motion Copilot</h2>
+          <span id="code-runner-badge" class="mono-tag">READY (50 Hz)</span>
+        </div>
+        <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">
+          Paste or write Python / JavaScript kinematic routines, or ask the local LLM. Code executes live on the 15-DOF robot at 50 Hz!
+        </p>
+
+        <div class="code-editor-wrap">
+          <div class="code-editor-toolbar">
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <select id="select-code-preset" class="btn" style="padding:4px 8px; font-size:0.75rem;" aria-label="Motion Presets">
+                <option value="drunken_sailor" selected>Preset 1: Drunken Sailor Wobble</option>
+                <option value="tof_beatbox">Preset 2: ToF Theremin Beatbox</option>
+                <option value="self_righting">Preset 3: Self-Righting Acrobat</option>
+                <option value="laser_chase">Preset 4: Laser Dot Tracking</option>
+                <option value="python_style">Python: Waddle &amp; Quack</option>
+              </select>
+              <button id="btn-load-preset" class="btn btn-cyan" style="padding:4px 10px; font-size:0.75rem;" type="button">Load Preset</button>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button id="btn-run-code" class="btn btn-primary" style="padding:5px 14px; font-weight:600;" type="button">▶ Run Script</button>
+              <button id="btn-stop-code" class="btn" style="padding:5px 12px;" type="button">⏹ Stop</button>
+            </div>
+          </div>
+
+          <div class="ai-prompt-bar">
+            <input id="ai-prompt-input" class="ai-prompt-input" type="text" placeholder="Prompt Local AI (e.g. 'Make the duck waddle and nod with curious chirps')...">
+            <button id="btn-ai-generate" class="btn btn-purple" style="white-space:nowrap; padding:6px 12px; font-size:0.75rem;" type="button">✨ Ask AI</button>
+          </div>
+
+          <textarea id="code-editor-input" class="code-textarea" spellcheck="false" placeholder="// onStep(t, dt, duck) is called 50 times per second..."></textarea>
+
+          <div class="code-status-bar">
+            <span id="code-status-text">Status: Idle (Click 'Run Script' to execute)</span>
+            <span id="code-api-hint">API: duck.setJoint, duck.setMouth, duck.setTwist, duck.readTof</span>
+          </div>
+        </div>
+      </article>
+
       <article class="card">
         <div class="card-header">
           <h2>Live 61-D Policy Observation Vector (`obs[1,61]`)</h2>
