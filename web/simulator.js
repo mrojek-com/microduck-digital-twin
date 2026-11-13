@@ -1,6 +1,12 @@
 (() => {
   "use strict";
 
+  window.addEventListener("error", (e) => {
+    const el = document.getElementById("log-feed");
+    if (el) el.innerHTML += '<div style="color:#ef4444; font-weight:bold;">FATAL JS: ' + e.message + ' (' + e.filename + ':' + e.lineno + ')</div>';
+    console.error("FATAL JS ERROR:", e);
+  });
+
   // ---------------------------------------------------------------------------
   // 1. Ground-Truth Constants (matching duck-control/src/model.rs & obs.rs)
   // ---------------------------------------------------------------------------
@@ -300,11 +306,76 @@
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.10;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b101b);
-  scene.fog = new THREE.FogExp2(0x0b101b, 0.14);
+  scene.fog = new THREE.FogExp2(0x0b101b, 0.12);
+
+  // ───────────── Procedural Studio HDRI Environment (PBR IBL) ─────────────
+  function createStudioEnvironment(r, s) {
+    const W = 512, H = 256;
+    const c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    const g = c.getContext("2d");
+
+    // Base: dark studio vertical gradient
+    const base = g.createLinearGradient(0, 0, 0, H);
+    base.addColorStop(0.00, "#2a2e36");
+    base.addColorStop(0.45, "#14161b");
+    base.addColorStop(0.50, "#101216");
+    base.addColorStop(0.55, "#1a1b1e");
+    base.addColorStop(1.00, "#3a3834");
+    g.fillStyle = base;
+    g.fillRect(0, 0, W, H);
+
+    // Soft-edged studio softboxes (wraps seam)
+    const softbox = (cx, cy, rx, ry, inner, outer) => {
+      for (const ox of [-W, 0, W]) {
+        g.save();
+        g.translate(cx + ox, cy);
+        g.scale(rx, ry);
+        const rg = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+        rg.addColorStop(0.00, inner);
+        rg.addColorStop(0.45, inner);
+        rg.addColorStop(1.00, outer);
+        g.fillStyle = rg;
+        g.beginPath();
+        g.arc(0, 0, 1, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+    };
+
+    g.globalCompositeOperation = "lighter";
+    softbox(W * 0.15, H * 0.30, 90, 48, "rgba(255,214,170,1.0)", "rgba(255,214,170,0)");  // Warm Key
+    softbox(W * 0.62, H * 0.34, 70, 36, "rgba(150,190,255,0.85)", "rgba(150,190,255,0)"); // Cool Rim
+    softbox(W * 0.88, H * 0.22, 60, 28, "rgba(210,220,255,0.45)", "rgba(210,220,255,0)"); // Fill
+    softbox(W * 0.40, H * 0.08, 120, 18, "rgba(255,255,255,0.55)", "rgba(255,255,255,0)"); // Overhead Strip
+
+    // Warm floor bounce glow below horizon
+    const fl = g.createLinearGradient(0, H * 0.5, 0, H);
+    fl.addColorStop(0, "rgba(90,84,76,0)");
+    fl.addColorStop(1, "rgba(120,112,100,0.55)");
+    g.fillStyle = fl;
+    g.fillRect(0, H * 0.5, W, H * 0.5);
+    g.globalCompositeOperation = "source-over";
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+
+    const pmrem = new THREE.PMREMGenerator(r);
+    pmrem.compileEquirectangularShader();
+    const envMap = pmrem.fromEquirectangular(tex).texture;
+
+    s.environment = envMap;
+    tex.dispose();
+    pmrem.dispose();
+    return envMap;
+  }
+  createStudioEnvironment(renderer, scene);
 
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.02, 40);
   camera.position.set(0.55, 0.36, 0.58);
@@ -319,30 +390,42 @@
   controls.maxDistance = 3.5;
   controls.maxPolarAngle = Math.PI * 0.495; // Never dip below the floor
 
-  // Lighting
-  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.65));
-  const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
-  keyLight.position.set(1.8, 3.0, 2.2);
+  // ───────────── Studio Lighting ─────────────
+  const hemisphereLight = new THREE.HemisphereLight(0xdfe8ff, 0x2a2622, 0.30);
+  scene.add(hemisphereLight);
+
+  const keyLight = new THREE.DirectionalLight(0xfff0dc, 2.1);
+  keyLight.position.set(2.2, 3.8, 2.4);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(2048, 2048);
-  keyLight.shadow.camera.near = 0.1;
-  keyLight.shadow.camera.far = 10;
-  keyLight.shadow.camera.left = -2;
-  keyLight.shadow.camera.right = 2;
-  keyLight.shadow.camera.top = 2;
-  keyLight.shadow.camera.bottom = -2;
+  keyLight.shadow.radius = 3.5;
+  keyLight.shadow.bias = -0.0003;
+  keyLight.shadow.normalBias = 0.015;
+  const sc = keyLight.shadow.camera;
+  sc.near = 0.5;
+  sc.far = 12;
+  sc.left = sc.bottom = -2.2;
+  sc.right = sc.top = 2.2;
+  sc.updateProjectionMatrix();
   scene.add(keyLight);
 
-  const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.65);
-  rimLight.position.set(-2.0, 1.4, -1.8);
+  const fillLight = new THREE.DirectionalLight(0xb4ccff, 0.65);
+  fillLight.position.set(-2.8, 1.8, 2.0);
+  fillLight.castShadow = false;
+  scene.add(fillLight);
+
+  const rimLight = new THREE.DirectionalLight(0xa8c8ff, 1.55);
+  rimLight.position.set(-1.6, 2.8, -3.2);
+  rimLight.castShadow = false;
   scene.add(rimLight);
 
   // Arena Floor + Grid
   const floorGeo = new THREE.PlaneGeometry(14, 14);
   const floorMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
-    roughness: 0.78,
-    metalness: 0.08,
+    roughness: 0.82,
+    metalness: 0.12,
+    envMapIntensity: 0.35,
   });
   const floorMesh = new THREE.Mesh(floorGeo, floorMat);
   floorMesh.rotation.x = -Math.PI / 2;
@@ -353,19 +436,62 @@
   gridHelper.position.y = 0.001;
   scene.add(gridHelper);
 
-  // Contact shadow disc under robot
-  const shadowDisc = new THREE.Mesh(
-    new THREE.CircleGeometry(0.11, 32),
-    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 })
-  );
-  shadowDisc.rotation.x = -Math.PI / 2;
-  shadowDisc.position.y = 0.002;
-  scene.add(shadowDisc);
+  // ───────────── Soft Radial Contact Shadow ─────────────
+  function createContactShadow() {
+    const S = 128;
+    const c = document.createElement("canvas");
+    c.width = c.height = S;
+    const g = c.getContext("2d");
+    const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    rg.addColorStop(0.00, "rgba(0,0,0,0.72)");
+    rg.addColorStop(0.35, "rgba(0,0,0,0.45)");
+    rg.addColorStop(0.70, "rgba(0,0,0,0.12)");
+    rg.addColorStop(1.00, "rgba(0,0,0,0)");
+    g.fillStyle = rg;
+    g.fillRect(0, 0, S, S);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.52, 0.52),
+      new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        depthWrite: false,
+        toneMapped: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0.002;
+    mesh.renderOrder = 1;
+    return mesh;
+  }
+
+  function updateContactShadow(mesh, pose) {
+    const a = Math.max(0, pose.liftY || 0);
+    const k = Math.exp(-a / 0.12);
+    mesh.position.set(pose.x, 0.002, pose.z);
+    mesh.scale.setScalar(1 + a * 2.8);
+    mesh.material.opacity = Math.max(0.0, Math.min(1.0, k * 0.72));
+    mesh.visible = mesh.material.opacity > 0.01;
+  }
+
+  const shadowMesh = createContactShadow();
+  scene.add(shadowMesh);
 
   // Purple Soccer Ball
   const ballMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.042, 24, 24),
-    new THREE.MeshStandardMaterial({ color: 0x9333ea, roughness: 0.35, metalness: 0.1 })
+    new THREE.SphereGeometry(0.042, 32, 32),
+    new THREE.MeshStandardMaterial({
+      color: 0x9333ea,
+      roughness: 0.30,
+      metalness: 0.10,
+      envMapIntensity: 1.15,
+    })
   );
   ballMesh.castShadow = true;
   ballMesh.position.set(state.ball.x, 0.042, state.ball.z);
@@ -430,8 +556,9 @@
 
     const mat = new THREE.MeshStandardMaterial({
       color: 0x38bdf8,
-      roughness: 0.45,
-      metalness: 0.25,
+      roughness: 0.22,
+      metalness: 0.15,
+      envMapIntensity: 1.30,
       flatShading: true,
     });
     const radius = tireAssetData.radius_m || 0.015;
@@ -504,12 +631,20 @@
     });
 
     rig.parts.forEach((p) => {
-      const role = classifyCadPartRole(p.rgb, p.body);
-      const isPlastic = role !== null;
+      const role = classifyCadPartRole(p.rgb, p.body) || "internal";
+      const PBR = {
+        shell:    { roughness: 0.32, metalness: 0.05, envMapIntensity: 1.25 },
+        trim:     { roughness: 0.44, metalness: 0.02, envMapIntensity: 0.90 },
+        eyeRing:  { roughness: 0.30, metalness: 0.10, envMapIntensity: 1.10 },
+        sole:     { roughness: 0.65, metalness: 0.02, envMapIntensity: 0.50 },
+        internal: { roughness: 0.26, metalness: 0.76, envMapIntensity: 1.45 },
+      };
+      const cfg = PBR[role] || PBR.internal;
       const mat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(p.rgb[0] / 255, p.rgb[1] / 255, p.rgb[2] / 255),
-        roughness: isPlastic ? 0.65 : 0.48,
-        metalness: isPlastic ? 0.05 : 0.18,
+        roughness: cfg.roughness,
+        metalness: cfg.metalness,
+        envMapIntensity: cfg.envMapIntensity,
         flatShading: true,
         side: THREE.DoubleSide,
       });
@@ -1245,8 +1380,7 @@
     // Update Three.js transforms
     duckWorldRoot.position.set(state.pose.x, state.pose.liftY, state.pose.z);
     duckWorldRoot.rotation.set(state.pose.rollFall, state.pose.yaw, -state.pose.pitchFall);
-    shadowDisc.position.set(state.pose.x, 0.002, state.pose.z);
-    shadowDisc.material.opacity = Math.max(0.12, 0.45 - state.pose.liftY * 1.5);
+    updateContactShadow(shadowMesh, state.pose);
 
     if (state.activeMesh === "cad") {
       applyJointsToCadGroups(cadBodyGroups, state.joints);
