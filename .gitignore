@@ -1,0 +1,89 @@
+# =============================================================================
+# MicroDuck Digital Twin — Public GitHub Repository .gitignore
+# =============================================================================
+# Ensures zero API keys, zero PII, zero local machine paths, and zero upstream
+# third-party code/CAD/ONNX binaries are committed to the public repository.
+# Upstream assets are fetched on demand via `bash scripts/fetch_upstream_assets.sh`.
+# =============================================================================
+
+# --- Critical Secrets, API Keys & Credentials ---
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+*secret*
+*credentials*
+*token*
+.anthropic_api_key
+.hf_token
+.netrc
+
+# --- Upstream Third-Party Clones (Fetched via scripts/fetch_upstream_assets.sh) ---
+# Official repos:
+#   - https://github.com/pollen-robotics/microduck
+#   - https://github.com/LuwuDynamics/xgoduck_hardware
+repo/
+xgoduck_hardware/
+
+# --- Upstream-Derived Runtime Assets (Generated locally by fetch_upstream_assets.sh) ---
+web/assets/models/
+web/assets/emotions/
+web/assets/policies/
+web/assets/scores/
+web/assets/flux/xgo-duck-*
+web/assets/flux/ref_microduck_*
+
+# --- Python / Test / Runtime Caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# --- Node / Web / Browser Profiles & Telemetry ---
+node_modules/
+.npm/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+chrome-profile*/
+userdata*/
+*.har
+*.trace.json
+
+# --- Local Databases, Session State & User Dumps ---
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.duckdb.wal
+*.pkl
+*.parquet
+
+# --- macOS / Editor / OS Metadata ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

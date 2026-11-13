@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MicroDuck Sovereign 3D Digital Twin &amp; Policy Lab</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/GLTFLoader.js"></script>
+  <script src="vendor/OrbitControls.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>
+        MicroDuck Alpha Digital Twin
+        <span class="duck-badge">50 Hz · obs[1,61] → act[1,14] · 15× XL330</span>
+      </h1>
+      <p>
+        Authentic CAD Rig (<code>duck.bin</code> + <code>robot_walk.xml</code>) · FLUX.1 + TripoSR 3D AI Mesh ·
+        13 Real Emotions · 4-Duck BLE Chorale · VL53L8CX ToF Theremin · Impact Guard Lab
+      </p>
+    </div>
+    <div class="top-actions">
+      <span id="pill-health" class="pill pill-ok">HEALTH: HEALTHY (50.0 Hz)</span>
+      <span id="pill-mode" class="pill pill-warn">MODE: WALK</span>
+      <button id="btn-open-flux" class="btn btn-primary" type="button">FLUX Gallery &amp; 3D STL</button>
+      <button id="btn-open-cheat" class="btn btn-cyan" type="button">Cheat Sheet</button>
+      <button id="btn-open-vetbook" class="btn" type="button">VetBook</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- LEFT COLUMN: Virtual Gamepad, Policies, Skills & Emotions -->
+    <section class="col-stack">
+      <article class="card">
+        <div class="card-header">
+          <h2>Virtual Gamepad &amp; Locomotion</h2>
+          <span class="mono-tag">WASD / Arrows</span>
+        </div>
+        <div class="pad-dpad">
+          <button class="btn active-mode" data-dpad="move" type="button">Move</button>
+          <button class="btn" data-dpad="head" type="button">Head</button>
+          <button class="btn" data-dpad="head_move" type="button">Head+Move</button>
+          <button class="btn" data-dpad="body_head" type="button">Body+Head</button>
+        </div>
+
+        <div class="control-row">
+          <label for="slider-vx">Forward Velocity (vx) <strong id="val-vx">0.00 m/s</strong></label>
+          <input id="slider-vx" type="range" min="-0.30" max="0.45" step="0.01" value="0">
+        </div>
+        <div class="control-row">
+          <label for="slider-vy">Strafe Velocity (vy) <strong id="val-vy">0.00 m/s</strong></label>
+          <input id="slider-vy" type="range" min="-0.25" max="0.25" step="0.01" value="0">
+        </div>
+        <div class="control-row">
+          <label for="slider-vyaw">Yaw Rate (vyaw) <strong id="val-vyaw">0.00 rad/s</strong></label>
+          <input id="slider-vyaw" type="range" min="-1.20" max="1.20" step="0.05" value="0">
+        </div>
+        <div class="control-row">
+          <label for="slider-head-yaw">Head Look Yaw <strong id="val-head-yaw">0.00 rad</strong></label>
+          <input id="slider-head-yaw" type="range" min="-1.40" max="1.40" step="0.05" value="0">
+        </div>
+        <div class="control-row">
+          <label for="slider-head-pitch">Head Look Pitch <strong id="val-head-pitch">0.00 rad</strong></label>
+          <input id="slider-head-pitch" type="range" min="-0.80" max="0.80" step="0.05" value="0">
+        </div>
+        <div class="control-row">
+          <label for="slider-mouth">Mouth / Beak (RT) <strong id="val-mouth">0%</strong></label>
+          <input id="slider-mouth" type="range" min="0" max="1" step="0.05" value="0">
+        </div>
+
+        <div class="btn-grid">
+          <button id="btn-stop-vel" class="btn" type="button">Stop (Zero Sticks)</button>
+          <button id="btn-quack" class="btn btn-primary" type="button">Quack! (RT)</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <h2>Policies &amp; Skills (`robot.do`)</h2>
+          <span id="skill-status-tag" class="mono-tag">velstand.onnx</span>
+        </div>
+        <div class="btn-grid-3" style="margin-bottom:8px;">
+          <button class="btn btn-primary" data-skill="walk" type="button">Walk</button>
+          <button class="btn" data-skill="roller" type="button">Roller</button>
+          <button class="btn" data-skill="sit_toggle" type="button">A: Sit/Stand</button>
+          <button class="btn" data-skill="ground_pick" type="button">B: Pick</button>
+          <button class="btn" data-skill="kick_left" type="button">Kick Left</button>
+          <button class="btn" data-skill="kick_right" type="button">Kick Right</button>
+          <button class="btn" data-skill="roulade" type="button">Roulade</button>
+          <button class="btn" data-skill="polite_bow" type="button">Polite Bow</button>
+          <button class="btn" data-skill="flamingo" type="button">Flamingo</button>
+        </div>
+
+        <div class="control-row">
+          <label for="select-emotion">Real Emotion Playback (Keyframes + .wav)</label>
+          <div style="display:flex; gap:6px;">
+            <select id="select-emotion">
+              <option value="excited">excited</option>
+              <option value="curious">curious</option>
+              <option value="laugh">laugh</option>
+              <option value="yes">yes</option>
+              <option value="yes_fast">yes_fast</option>
+              <option value="no">no</option>
+              <option value="angry">angry</option>
+              <option value="defiant">defiant</option>
+              <option value="impatient">impatient</option>
+              <option value="mmh">mmh</option>
+              <option value="mock">mock</option>
+              <option value="sad">sad</option>
+              <option value="devastated">devastated</option>
+            </select>
+            <button id="btn-play-emotion" class="btn btn-cyan" type="button" style="white-space:nowrap;">Play</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <h2>Safety &amp; Impact Guard Lab</h2>
+          <span class="mono-tag">XL330 V3/V4</span>
+        </div>
+        <div class="control-row">
+          <label for="select-guard">Impact Guard Profile</label>
+          <select id="select-guard">
+            <option value="R">Setting R (Hardened Default: v_min=6, 20ms, no hold, 40%)</option>
+            <option value="5">Level 5 (Factory Default: v_min=1, 50ms, 500mA hold — Collapse Bug)</option>
+            <option value="0">Level 0 (Off: 1000 mA Current Limit Only)</option>
+          </select>
+        </div>
+        <div class="btn-grid">
+          <button id="btn-push-test" class="btn btn-danger" type="button">Push Impulse (7.5 rad/s)</button>
+          <button id="btn-pickup-toggle" class="btn btn-purple" type="button">Pick Up Duck (Hand)</button>
+          <button id="btn-relax" class="btn" type="button">Rest / Recover</button>
+          <button id="btn-reset-pos" class="btn" type="button">Home &amp; Reset</button>
+        </div>
+      </article>
+    </section>
+
+    <!-- CENTER COLUMN: 3D Digital Twin Viewport + 61-D Observation & Telemetry -->
+    <section class="col-stack">
+      <article class="card viewport-card">
+        <div class="viewport-wrap">
+          <canvas id="sim-3d-canvas"></canvas>
+
+          <div class="viewport-overlay-top">
+            <div class="hud-chip-group">
+              <button id="btn-toggle-mesh" class="hud-chip active" type="button">[M] Rig: Articulated CAD (duck.bin)</button>
+              <select id="select-colorway" class="hud-chip" aria-label="Hardware Colorway" style="width:auto; max-width:260px; background:rgba(15,23,42,0.9); color:var(--text); border:1px solid rgba(148,163,184,0.35); cursor:pointer;">
+                <option value="white_orange" selected>Colorway: Classic White &amp; Orange</option>
+                <option value="sky_blue">Colorway: Sky Blue &amp; Orange</option>
+                <option value="lavender_yellow">Colorway: Lavender &amp; Cyan</option>
+                <option value="slate_purple">Colorway: Stealth Slate &amp; Purple</option>
+                <option value="cad_raw">Colorway: Raw CAD (duck.bin)</option>
+              </select>
+              <button id="btn-toggle-roller-skates" class="hud-chip" type="button">Roller Skates (V5 STL)</button>
+              <button id="btn-toggle-tof-rays" class="hud-chip active" type="button">8×8 ToF Rays</button>
+              <button id="btn-mode-autod" class="hud-chip" type="button">autod Brain</button>
+              <button id="btn-mode-laser" class="hud-chip" type="button">Laser Chase</button>
+              <button id="btn-mode-soccer" class="hud-chip" type="button">Auto Soccer</button>
+            </div>
+            <div class="hud-chip-group">
+              <button id="btn-cam-follow" class="hud-chip active" type="button">Follow Cam</button>
+            </div>
+          </div>
+
+          <div class="viewport-overlay-bottom">
+            <div class="face-led-bar" title="12 Face Board LEDs (architecture.md §3.2)">
+              <span>LEDs:</span>
+              <span id="led-status" class="led-dot" title="Status gr2"></span>
+              <span id="led-net" class="led-dot" title="Network gb"></span>
+              <span id="led-cam" class="led-dot" title="Camera cam:red"></span>
+              <span id="led-flash" class="led-dot" title="Flashlight RGB"></span>
+              <span id="led-bat1" class="led-dot" title="Battery 1"></span>
+              <span id="led-bat2" class="led-dot" title="Battery 2"></span>
+              <span id="led-bat3" class="led-dot" title="Battery 3"></span>
+            </div>
+            <span id="hud-pose-readout">Click floor to place Laser Dot · Drag to Orbit</span>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-box"><span>Odometry (X, Y)</span><strong id="m-odom">0.00, 0.00 m</strong></div>
+          <div class="metric-box"><span>Active Brain</span><strong id="m-brain">MANUAL WALK</strong></div>
+          <div class="metric-box"><span>Safety State</span><strong id="m-safety">UPRIGHT · ARMED</strong></div>
+          <div class="metric-box"><span>Impact / Falls</span><strong id="m-trips">0 trips · 0 falls</strong></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <h2>Live 61-D Policy Observation Vector (`obs[1,61]`)</h2>
+          <span class="mono-tag">duck-control/src/obs.rs</span>
+        </div>
+        <canvas id="obs-canvas" class="obs-canvas" width="760" height="76"></canvas>
+        <div style="display:flex; justify-content:space-between; font-family:var(--mono); font-size:0.68rem; color:var(--muted); margin-top:5px;">
+          <span>0..2 Gyro</span>
+          <span>3..5 Gravity</span>
+          <span>6..19 q-home (no mouth)</span>
+          <span>20..33 qdot</span>
+          <span>34..47 prev_act</span>
+          <span>48..60 cmd[vx,vy,vyaw,head,body]</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <h2>JSON-RPC Event &amp; Journal Log (`robotd` / `autod` / `updaterd`)</h2>
+          <span class="mono-tag">NDJSON Unix IPC</span>
+        </div>
+        <div id="log-feed" class="log-feed"></div>
+      </article>
+    </section>
+
+    <!-- RIGHT COLUMN: ToF Theremin, 4-Duck Chorale, and 15-Joint Live Table -->
+    <section class="col-stack">
+      <article class="card">
+        <div class="card-header">
+          <h2>ToF 8×8 Matrix &amp; Live Theremin</h2>
+          <span id="theremin-hz" class="mono-tag">OFF</span>
+        </div>
+        <div style="display:grid; grid-template-columns: 156px 1fr; gap:10px; align-items:center;">
+          <div id="tof-grid" class="tof-grid"></div>
+          <div>
+            <div class="control-row">
+              <label for="slider-theremin">Hand Distance <strong id="val-theremin">0.34 m</strong></label>
+              <input id="slider-theremin" type="range" min="0.08" max="0.65" step="0.01" value="0.34">
+            </div>
+            <button id="btn-theremin" class="btn btn-cyan" style="width:100%; margin-bottom:6px;" type="button">
+              Enable ToF Theremin Audio
+            </button>
+            <p style="font-size:0.72rem; color:var(--muted);">
+              Includes ST codes <code>4,13</code> so reach extends past 30 cm. Mouth opens with pitch!
+            </p>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <h2>4-Duck BLE Chorale Ensemble</h2>
+          <span id="chorale-beat" class="mono-tag">IDLE</span>
+        </div>
+        <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">
+          Spawns 3 companion ducks (Bass, Tenor, Alto, Soprano) synced via BLE beat counter singing <code>wistful.duckscore</code> (48 kHz formants).
+        </p>
+        <div class="btn-grid">
+          <button id="btn-chorale" class="btn btn-purple" type="button">Start 4-Duck Chorale</button>
+          <button id="btn-chorale-stop" class="btn" type="button">Stop Choir</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <h2>15× Dynamixel XL330 Joint Monitor</h2>
+          <span class="mono-tag">1 Mbps UART · ID 11..35</span>
+        </div>
+        <div style="max-height:290px; overflow-y:auto;">
+          <table class="joints-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Joint</th>
+                <th>Angle (deg)</th>
+                <th>Guard</th>
+              </tr>
+            </thead>
+            <tbody id="joints-tbody"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <!-- FLUX GALLERY & 3D STL MODAL -->
+  <div id="modal-flux" class="modal" role="dialog" aria-modal="true" aria-label="FLUX Studio Gallery">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2>Official Hardware Reference Colorways, FLUX.1 Renders &amp; 3D STL Mesh</h2>
+        <button id="btn-close-flux" class="btn" type="button">Close</button>
+      </div>
+      <p style="font-size:0.82rem; color:var(--muted); margin-bottom:10px;">
+        Real CAD/STL geometry from <code>pollen-robotics/microduck</code> (<code>duck.bin</code>) &amp; <code>LuwuDynamics/xgoduck_hardware</code> (97 real printable STLs: 47 V2 + 50 V5), plus local FLUX.1 hardware-conditioned renders.
+        <a id="stl-download-link" href="assets/models/microduck_3d_print.stl" download="microduck_3d_print.stl" style="color:var(--accent); font-weight:600; margin-left:8px;">Download Full Articulated CAD STL (270mm)</a>
+      </p>
+      <h3 style="font-size:0.88rem; color:var(--emerald); margin:10px 0 6px;">Official XGO-Duck 97-STL Part Browser &amp; Direct Downloads (<code>LuwuDynamics/xgoduck_hardware</code>)</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_FACE.stl" download>V5 Face Shell STL</a>
+        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_JAW.stl" download>V5 Lower Jaw STL</a>
+        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_BODY_SHELL_LEFT.stl" download>V5 Body Shell L STL</a>
+        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_THIGH_LEFT_SHELL.stl" download>V5 Thigh Shell L STL</a>
+        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_LEFT_FOOT.stl" download>V5 Left Foot STL</a>
+        <a class="btn btn-primary" href="assets/models/stl/V5_AUDIO_VIDEO_FOOT_BOTTOM_TPU_01.stl" download>V5 Foot Sole TPU STL</a>
+        <a class="btn btn-purple" href="assets/models/stl/V5_AUDIO_VIDEO_TIRE_01.stl" download>V5 Roller Skate Tire STL</a>
+        <a class="btn" href="assets/models/stl/V2_STANDARD_HEAD_COVER.stl" download>V2 Head Cover STL</a>
+        <a class="btn" href="assets/models/xgoduck_stl_catalog.json" target="_blank">97-STL JSON Catalog</a>
+      </div>
+      <div class="flux-grid" id="xgoduck-photo-grid" style="margin-bottom:14px;">
+        <figure class="flux-item">
+          <img src="assets/flux/xgo-duck-hero.jpg" alt="XGO-Duck Hardware Prototype">
+          <figcaption><strong>XGO-Duck Hardware Build:</strong> 15× Feetech 1910 servos, Arduino UNO Q, Luwu V1.1 PCBA, printable STL kit.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/xgo-duck-open-beak.jpg" alt="XGO-Duck Open Beak">
+          <figcaption><strong>V5 Face &amp; Articulated Jaw:</strong> Dual TPU beak inserts (ID 34) with camera + ToF + ring light.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/xgo-duck-rear.jpg" alt="XGO-Duck Rear UNO Q Stack">
+          <figcaption><strong>Rear Backpack Stack:</strong> Arduino UNO Q (Linux ONNX host + STM32 servo bus bridge) &amp; QMI8658A IMU.</figcaption>
+        </figure>
+      </div>
+      <h3 style="font-size:0.88rem; color:var(--cyan); margin:10px 0 6px;">Official Hardware Reference Colorways</h3>
+      <div class="flux-grid" id="ref-gallery-grid" style="margin-bottom:14px;">
+        <figure class="flux-item">
+          <img src="assets/flux/ref_microduck_white_orange.jpg" alt="Classic White & Orange MicroDuck">
+          <figcaption><strong>Classic White &amp; Orange:</strong> Studio profile — arched visor hood, yellow camera ring, hinged orange lower jaw &amp; XL330 neck.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/ref_microduck_sky_blue.png" alt="Sky Blue & Orange MicroDuck">
+          <figcaption><strong>Sky Blue &amp; Orange:</strong> Pastel sky-blue 3D-printed shells, single camera-ring eye, ToF slot, and orange/yellow feet.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/ref_microduck_lavender.jpg" alt="Lavender & Cyan MicroDuck">
+          <figcaption><strong>Lavender &amp; Cyan:</strong> Sitting crouch stance with lavender shells, cyan camera bezel, and yellow beak trim.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/ref_microduck_slate_purple.jpg" alt="Stealth Slate & Purple MicroDuck">
+          <figcaption><strong>Stealth Slate &amp; Purple:</strong> Dark slate-grey printed shells, purple camera bezel &amp; soles, bright yellow jaw.</figcaption>
+        </figure>
+      </div>
+      <h3 style="font-size:0.88rem; color:var(--accent); margin:10px 0 6px;">Local FLUX.1 (MLX 4-bit img2img) Renders &amp; TripoSR 3D Source</h3>
+      <div class="flux-grid" id="flux-gallery-grid">
+        <figure class="flux-item">
+          <img src="assets/flux/flux_microduck_hero_studio.png" alt="MicroDuck Alpha Hero Studio Render">
+          <figcaption><strong>Hero Studio Render (White &amp; Orange):</strong> Hardware-conditioned studio shot alongside TripoSR 3D mesh (<code>microduck_flux_ai.glb</code>).</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/flux_microduck_cyber_bench.png" alt="MicroDuck Stealth Slate on Workbench">
+          <figcaption><strong>RK3566 &amp; XL330 Workbench (Stealth Slate):</strong> 15-servo UART bus, 8×8 ToF VL53L8CX, and 50 Hz RL telemetry.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/flux_microduck_soccer_arena.png" alt="MicroDuck Soccer Arena">
+          <figcaption><strong>Autonomous Soccer (Sky Blue &amp; Orange):</strong> Purple ball &amp; red laser YUV vision tracking arena.</figcaption>
+        </figure>
+        <figure class="flux-item">
+          <img src="assets/flux/flux_microduck_chorale_choir.png" alt="MicroDuck 4-Part Chorale">
+          <figcaption><strong>4-Duck BLE Chorale (Lavender &amp; Yellow):</strong> NTP-free ±20 ms beacon phase-locked vocal ensemble.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHEATSHEET MODAL -->
+  <div id="modal-cheat" class="modal" role="dialog" aria-modal="true" aria-label="MicroDuck Cheat Sheet">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2>MicroDuck Operator &amp; Developer Master Cheat Sheet</h2>
+        <button id="btn-close-cheat" class="btn" type="button">Close</button>
+      </div>
+      <pre class="cheat-pre" id="cheat-pre-content">Loading cheat sheet...</pre>
+    </div>
+  </div>
+
+  <!-- VETBOOK MODAL -->
+  <div id="modal-vetbook" class="modal" role="dialog" aria-modal="true" aria-label="MicroDuck VetBook">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2>MicroDuck Lifetime VetBook (`/var/lib/robot/vetbook.json`)</h2>
+        <button id="btn-close-vetbook" class="btn" type="button">Close</button>
+      </div>
+      <div id="vetbook-body" style="font-family:var(--mono); font-size:0.8rem;"></div>
+    </div>
+  </div>
+
+  <script src="simulator.js"></script>
+</body>
+</html>

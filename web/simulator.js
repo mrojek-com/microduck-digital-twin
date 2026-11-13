@@ -1,0 +1,1520 @@
+(() => {
+  "use strict";
+
+  // ---------------------------------------------------------------------------
+  // 1. Ground-Truth Constants (matching duck-control/src/model.rs & obs.rs)
+  // ---------------------------------------------------------------------------
+  const JOINT_NAMES = [
+    "left_hip_yaw", "left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
+    "neck_pitch", "head_pitch", "head_yaw", "head_roll", "mouth",
+    "right_hip_yaw", "right_hip_roll", "right_hip_pitch", "right_knee", "right_ankle",
+  ];
+  const JOINT_IDS = [11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 31, 32, 33, 34, 35];
+  const MOUTH_INDEX = 9;
+
+  const DEFAULT_POSITION = [
+    0.0, -0.0873, -0.4579, -0.0049, 0.4530,
+    0.3491, 0.3491, 0.0, 0.0, 0.0,
+    0.0, 0.0873, 0.4579, 0.0049, -0.4530,
+  ];
+
+  const REST_POSITION = [
+    0.3129, 0.4050, -0.2338, 1.5493, 0.5522,
+    0.9572, 1.4787, -0.0129, -0.0522, -0.0121,
+    0.0353, -0.5660, 0.2853, -1.4696, -0.4096,
+  ];
+
+  const PAUSE_POSE_OFFSETS = [
+    0.0, -0.100, 0.038, -0.145, 0.044,
+    -0.096, 0.008, 0.0, 0.0,
+    0.0, 0.100, -0.038, 0.145, -0.044,
+  ];
+
+  const MOUTH_CLOSED = (-5.0 * Math.PI) / 180.0;
+  const MOUTH_OPEN = (30.0 * Math.PI) / 180.0;
+
+  function mouthTarget(openFrac) {
+    const f = Number.isFinite(openFrac) ? Math.max(0, Math.min(1, openFrac)) : 0;
+    return MOUTH_CLOSED + f * (MOUTH_OPEN - MOUTH_CLOSED);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. DOM Elements
+  // ---------------------------------------------------------------------------
+  const canvas3d = document.getElementById("sim-3d-canvas");
+  const obsCanvas = document.getElementById("obs-canvas");
+  const obsCtx = obsCanvas.getContext("2d");
+
+  const pillHealth = document.getElementById("pill-health");
+  const pillMode = document.getElementById("pill-mode");
+  const skillStatusTag = document.getElementById("skill-status-tag");
+  const mOdom = document.getElementById("m-odom");
+  const mBrain = document.getElementById("m-brain");
+  const mSafety = document.getElementById("m-safety");
+  const mTrips = document.getElementById("m-trips");
+  const hudPoseReadout = document.getElementById("hud-pose-readout");
+  const logFeed = document.getElementById("log-feed");
+  const jointsTbody = document.getElementById("joints-tbody");
+  const tofGrid = document.getElementById("tof-grid");
+
+  const sliderVx = document.getElementById("slider-vx");
+  const sliderVy = document.getElementById("slider-vy");
+  const sliderVyaw = document.getElementById("slider-vyaw");
+  const sliderHeadYaw = document.getElementById("slider-head-yaw");
+  const sliderHeadPitch = document.getElementById("slider-head-pitch");
+  const sliderMouth = document.getElementById("slider-mouth");
+  const sliderTheremin = document.getElementById("slider-theremin");
+
+  const valVx = document.getElementById("val-vx");
+  const valVy = document.getElementById("val-vy");
+  const valVyaw = document.getElementById("val-vyaw");
+  const valHeadYaw = document.getElementById("val-head-yaw");
+  const valHeadPitch = document.getElementById("val-head-pitch");
+  const valMouth = document.getElementById("val-mouth");
+  const valTheremin = document.getElementById("val-theremin");
+
+  const btnToggleMesh = document.getElementById("btn-toggle-mesh");
+  const btnToggleTofRays = document.getElementById("btn-toggle-tof-rays");
+  const btnModeAutod = document.getElementById("btn-mode-autod");
+  const btnModeLaser = document.getElementById("btn-mode-laser");
+  const btnModeSoccer = document.getElementById("btn-mode-soccer");
+  const btnCamFollow = document.getElementById("btn-cam-follow");
+  const btnTheremin = document.getElementById("btn-theremin");
+  const thereminHz = document.getElementById("theremin-hz");
+  const choraleBeat = document.getElementById("chorale-beat");
+  const selectGuard = document.getElementById("select-guard");
+
+  // ---------------------------------------------------------------------------
+  // 3. Simulation State
+  // ---------------------------------------------------------------------------
+  const state = {
+    time: 0,
+    dt: 0.02, // 50 Hz control tick
+    dpadMode: "move",
+    locomotionMode: "walk", // walk | roller
+    rollerSkatesForced: false,
+    brainMode: "manual", // manual | autod | laser | soccer
+    activeMesh: "cad", // cad | flux_ai
+    showTofRays: true,
+    followCam: true,
+
+    cmd: {
+      vx: 0,
+      vy: 0,
+      vyaw: 0,
+      neckPitch: 0,
+      headPitch: 0,
+      headYaw: 0,
+      headRoll: 0,
+      bodyZ: 0,
+      bodyRoll: 0,
+      bodyPitch: 0,
+      mouthOpen: 0,
+    },
+
+    joints: [...DEFAULT_POSITION],
+    velocities: new Array(15).fill(0),
+    prevAction14: new Array(14).fill(0),
+    obs61: new Array(61).fill(0),
+    impactGuardStates: new Array(15).fill(0), // 0 armed, 1 braking, 2 soft hold
+
+    pose: { x: 0, z: 0, yaw: 0, liftY: 0, pitchFall: 0, rollFall: 0 },
+    ball: { x: 0.55, z: -0.25, vx: 0, vz: 0 },
+    laser: { x: 0.45, z: 0.30, active: false },
+
+    isSeated: false,
+    isResting: false,
+    isPickedUp: false,
+    pickupElapsed: 0,
+    pickupStartPose: [...DEFAULT_POSITION],
+
+    isFallen: false,
+    fallTrips: 0,
+    fallCount: 0,
+    guardLevel: "R",
+
+    activeSkill: null, // { name, elapsed, duration }
+    activeEmotion: null, // { name, keyframes, elapsed, duration }
+
+    thereminOn: false,
+    choraleOn: false,
+    choraleTick: 0,
+    autodState: "Wander",
+    autodTimer: 0,
+    autodGoal: { x: 0.5, z: 0.2 },
+
+    vetbook: {
+      name: "duck-alpha-sim",
+      boots: 1,
+      metersWalked: 0,
+      kicks: 0,
+      quacks: 0,
+      emotionsPlayed: 0,
+      songsSung: 0,
+      falls: 0,
+      pickups: 0,
+    },
+  };
+
+  function pushLog(tag, msg) {
+    const div = document.createElement("div");
+    const ts = state.time.toFixed(1).padStart(5, " ");
+    div.textContent = `[${ts}s] [${tag}] ${msg}`;
+    logFeed.prepend(div);
+    while (logFeed.children.length > 40) {
+      logFeed.removeChild(logFeed.lastChild);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. Web Audio Engine (Duck Quack, 48kHz-style Formant Theremin & 4-Part Chorale)
+  // ---------------------------------------------------------------------------
+  let audioCtx = null;
+  let thereminOsc = null;
+  let thereminOsc2 = null;
+  let thereminGain = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audioCtx = new Ctx();
+    }
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+    return audioCtx;
+  }
+
+  function playProceduralQuack(pitchMult = 1.0) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(340 * pitchMult, now);
+    osc.frequency.exponentialRampToValueAtTime(210 * pitchMult, now + 0.14);
+
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(1150, now);
+    filter.frequency.exponentialRampToValueAtTime(780, now + 0.14);
+    filter.Q.value = 3.2;
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.19);
+    state.vetbook.quacks += 1;
+    state.cmd.mouthOpen = 0.85;
+    setTimeout(() => {
+      if (!state.thereminOn && !state.activeEmotion) state.cmd.mouthOpen = Number(sliderMouth.value);
+    }, 180);
+  }
+
+  function updateThereminAudio(active, freqHz) {
+    if (!active || !state.thereminOn) {
+      if (thereminGain && audioCtx) {
+        thereminGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.04);
+      }
+      return;
+    }
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    if (!thereminOsc) {
+      thereminOsc = ctx.createOscillator();
+      thereminOsc2 = ctx.createOscillator();
+      const filt = ctx.createBiquadFilter();
+      thereminGain = ctx.createGain();
+
+      thereminOsc.type = "sawtooth";
+      thereminOsc2.type = "triangle";
+      filt.type = "bandpass";
+      filt.frequency.value = 1100;
+      filt.Q.value = 2.5;
+      thereminGain.gain.value = 0.0001;
+
+      thereminOsc.connect(filt);
+      thereminOsc2.connect(filt);
+      filt.connect(thereminGain);
+      thereminGain.connect(ctx.destination);
+      thereminOsc.start();
+      thereminOsc2.start();
+    }
+    thereminOsc.frequency.setTargetAtTime(freqHz, ctx.currentTime, 0.03);
+    thereminOsc2.frequency.setTargetAtTime(freqHz * 2.0, ctx.currentTime, 0.03);
+    thereminGain.gain.setTargetAtTime(0.08, ctx.currentTime, 0.04);
+  }
+
+  // 4-part Chorale chord sequence inspired by wistful.duckscore
+  const WISTFUL_CHORDS_HZ = [
+    [130.81, 196.0, 261.63, 329.63], // C3 G3 C4 E4
+    [123.47, 196.0, 246.94, 349.23], // B2 G3 B3 F4
+    [110.0, 174.61, 220.0, 329.63],  // A2 F3 A3 E4
+    [103.83, 155.56, 207.65, 311.13],// Ab2 Eb3 Ab3 Eb4 (borrowed minor)
+    [130.81, 196.0, 261.63, 392.0],  // C3 G3 C4 G4
+  ];
+
+  let choraleInterval = null;
+  function playChoraleChord(freqs) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    freqs.forEach((f, idx) => {
+      const osc = ctx.createOscillator();
+      const filt = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      osc.type = idx === 0 ? "triangle" : "sawtooth";
+      osc.frequency.setValueAtTime(f, now);
+      filt.type = "lowpass";
+      filt.frequency.setValueAtTime(950 + idx * 180, now);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.045, now + 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 1.05);
+      osc.connect(filt);
+      filt.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 1.1);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5. Three.js 3D Scene, Authentic CAD Rig (`duck.bin`) & FLUX AI GLB Loader
+  // ---------------------------------------------------------------------------
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b101b);
+  scene.fog = new THREE.FogExp2(0x0b101b, 0.14);
+
+  const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.02, 40);
+  camera.position.set(0.55, 0.36, 0.58);
+
+  const controls = new THREE.OrbitControls(camera, canvas3d);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 0.14, 0);
+  controls.minDistance = 0.25;
+  controls.maxDistance = 4.5;
+
+  // Lighting
+  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.65));
+  const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+  keyLight.position.set(1.8, 3.0, 2.2);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.camera.near = 0.1;
+  keyLight.shadow.camera.far = 10;
+  keyLight.shadow.camera.left = -2;
+  keyLight.shadow.camera.right = 2;
+  keyLight.shadow.camera.top = 2;
+  keyLight.shadow.camera.bottom = -2;
+  scene.add(keyLight);
+
+  const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.65);
+  rimLight.position.set(-2.0, 1.4, -1.8);
+  scene.add(rimLight);
+
+  // Arena Floor + Grid
+  const floorGeo = new THREE.PlaneGeometry(14, 14);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    roughness: 0.78,
+    metalness: 0.08,
+  });
+  const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+
+  const gridHelper = new THREE.GridHelper(6, 60, 0x334155, 0x1e293b);
+  gridHelper.position.y = 0.001;
+  scene.add(gridHelper);
+
+  // Contact shadow disc under robot
+  const shadowDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(0.11, 32),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 })
+  );
+  shadowDisc.rotation.x = -Math.PI / 2;
+  shadowDisc.position.y = 0.002;
+  scene.add(shadowDisc);
+
+  // Purple Soccer Ball
+  const ballMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.042, 24, 24),
+    new THREE.MeshStandardMaterial({ color: 0x9333ea, roughness: 0.35, metalness: 0.1 })
+  );
+  ballMesh.castShadow = true;
+  ballMesh.position.set(state.ball.x, 0.042, state.ball.z);
+  scene.add(ballMesh);
+
+  // Red Laser Dot
+  const laserDotMesh = new THREE.Mesh(
+    new THREE.CircleGeometry(0.018, 24),
+    new THREE.MeshBasicMaterial({ color: 0xff2244 })
+  );
+  laserDotMesh.rotation.x = -Math.PI / 2;
+  laserDotMesh.position.set(state.laser.x, 0.004, state.laser.z);
+  laserDotMesh.visible = false;
+  scene.add(laserDotMesh);
+
+  // Duck World Root (Y-up world placement)
+  const duckWorldRoot = new THREE.Group();
+  scene.add(duckWorldRoot);
+
+  // Z-up -> Y-up adapter group
+  const duckCadContainer = new THREE.Group();
+  duckCadContainer.rotation.x = -Math.PI / 2;
+  duckWorldRoot.add(duckCadContainer);
+
+  // FLUX AI Mesh Container
+  const fluxAiContainer = new THREE.Group();
+  fluxAiContainer.visible = false;
+  duckWorldRoot.add(fluxAiContainer);
+
+  // Companion Choir Ducks Group (for 4-Duck Chorale)
+  const choirGroup = new THREE.Group();
+  choirGroup.visible = false;
+  scene.add(choirGroup);
+
+  // 8x8 ToF 3D Ray Dots
+  const tofMarkersGroup = new THREE.Group();
+  scene.add(tofMarkersGroup);
+  const tofMarkerMeshes = [];
+  const tofDotGeo = new THREE.SphereGeometry(0.006, 8, 8);
+  for (let i = 0; i < 64; i++) {
+    const m = new THREE.Mesh(
+      tofDotGeo,
+      new THREE.MeshBasicMaterial({ color: 0x22d3ee })
+    );
+    tofMarkersGroup.add(m);
+    tofMarkerMeshes.push(m);
+  }
+
+  let cadBodyGroups = [];
+  let cadRigData = null;
+  const rollerWheels = [];
+  let tireAssetData = null;
+
+  function tryAttachRollerWheels() {
+    if (!tireAssetData || !cadBodyGroups || cadBodyGroups.length < 15 || rollerWheels.length > 0) return;
+    const g = new THREE.BufferGeometry();
+    const verts = new Float32Array(tireAssetData.verts.flat());
+    const indices = new Uint32Array(tireAssetData.faces.flat());
+    g.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+    g.setIndex(new THREE.BufferAttribute(indices, 1));
+    g.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      roughness: 0.45,
+      metalness: 0.25,
+      flatShading: true,
+    });
+    const radius = tireAssetData.radius_m || 0.015;
+    // Ensure world matrices reflect Home Pose before sampling foot bounds
+    applyJointsToCadGroups(cadBodyGroups, DEFAULT_POSITION);
+    duckWorldRoot.updateMatrixWorld(true);
+
+    // Mount 2 wheels on outer edge of left foot (body 5) and right foot (body 14)
+    [
+      { bodyIdx: 5, sideSign: 1 },
+      { bodyIdx: 14, sideSign: -1 },
+    ].forEach(({ bodyIdx, sideSign }) => {
+      const ankleGrp = cadBodyGroups[bodyIdx];
+      const box = new THREE.Box3().setFromObject(ankleGrp);
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+      [-0.32, 0.32].forEach((xFrac) => {
+        const w = new THREE.Mesh(g, mat);
+        w.castShadow = true;
+        w.receiveShadow = true;
+        const worldPos = new THREE.Vector3(
+          center.x + xFrac * Math.max(0.05, size.x),
+          radius + 0.001,
+          center.z + sideSign * (size.z * 0.55 + 0.008)
+        );
+        ankleGrp.worldToLocal(worldPos);
+        w.position.copy(worldPos);
+        // Align wheel rotation axis perpendicular to forward X axis (along local axle)
+        w.rotation.y = Math.PI / 2;
+        w.userData.radius = radius;
+        w.visible = state.locomotionMode === "roller" || state.rollerSkatesForced;
+        ankleGrp.add(w);
+        rollerWheels.push(w);
+      });
+    });
+    pushLog("STL", `Mounted 4 real CAD wheels from V5_AUDIO_VIDEO_TIRE_01.stl (${tireAssetData.faces.length} tris, r=${(radius * 1000).toFixed(1)}mm).`);
+  }
+
+  function buildCadRigInThree(rig, targetContainer) {
+    // Build Three.js BufferGeometries for the 29 unique CAD meshes
+    const geometries = rig.meshes.map((m) => {
+      const g = new THREE.BufferGeometry();
+      const verts = new Float32Array(m.verts.flat());
+      const indices = new Uint16Array(m.tris.flat());
+      g.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+      g.setIndex(new THREE.BufferAttribute(indices, 1));
+      g.computeVertexNormals();
+      return g;
+    });
+
+    const groups = rig.bodies.map((b) => {
+      const grp = new THREE.Group();
+      grp.position.set(b.pos[0], b.pos[1], b.pos[2]);
+      // MJCF quat is (w, x, y, z); Three.js is (x, y, z, w)
+      grp.userData.baseQuat = new THREE.Quaternion(b.quat[1], b.quat[2], b.quat[3], b.quat[0]).normalize();
+      grp.userData.axis = new THREE.Vector3(b.axis[0], b.axis[1], b.axis[2]).normalize();
+      grp.userData.jointIdx = b.joint;
+      grp.quaternion.copy(grp.userData.baseQuat);
+      return grp;
+    });
+
+    rig.bodies.forEach((b, idx) => {
+      if (b.parent >= 0) {
+        groups[b.parent].add(groups[idx]);
+      } else {
+        targetContainer.add(groups[idx]);
+      }
+    });
+
+    rig.parts.forEach((p) => {
+      const role = classifyCadPartRole(p.rgb, p.body);
+      const isPlastic = role !== null;
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(p.rgb[0] / 255, p.rgb[1] / 255, p.rgb[2] / 255),
+        roughness: isPlastic ? 0.65 : 0.48,
+        metalness: isPlastic ? 0.05 : 0.18,
+        flatShading: true,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geometries[p.mesh], mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+      mesh.quaternion.set(p.quat[1], p.quat[2], p.quat[3], p.quat[0]).normalize();
+      mesh.userData.baseRgb = p.rgb;
+      mesh.userData.bodyIdx = p.body;
+      groups[p.body].add(mesh);
+    });
+
+    return groups;
+  }
+
+  const HARDWARE_COLORWAYS = {
+    white_orange: { label: "Classic White & Orange", shell: 0xf4f1ea, trim: 0xf97316, eyeRing: 0xfacc15, sole: 0xfacc15 },
+    sky_blue:     { label: "Sky Blue & Orange",      shell: 0xb5e8f7, trim: 0xf97316, eyeRing: 0xfacc15, sole: 0xfacc15 },
+    lavender_yellow: { label: "Lavender & Cyan",     shell: 0xcbb7e8, trim: 0xfacc15, eyeRing: 0x99e2e8, sole: 0xfacc15 },
+    slate_purple: { label: "Stealth Slate & Purple", shell: 0x525866, trim: 0xfacc15, eyeRing: 0x9d6be8, sole: 0x9d6be8 },
+    cad_raw:      null,
+  };
+
+  function classifyCadPartRole(rgb, bodyIdx) {
+    const key = `${rgb[0]},${rgb[1]},${rgb[2]}`;
+    if (key === "234,234,234" || key === "137,218,211" || key === "217,193,221" || key === "196,226,243") {
+      return "shell";
+    }
+    if (key === "248,135,1" || key === "232,146,42" || key === "138,174,214") {
+      return "trim";
+    }
+    if (key === "250,182,1") {
+      return bodyIdx === 9 ? "eyeRing" : "sole";
+    }
+    return null;
+  }
+
+  function applyColorway(targetRoot, colorwayKey) {
+    const palette = HARDWARE_COLORWAYS[colorwayKey] || null;
+    targetRoot.traverse((child) => {
+      if (!child.isMesh || !child.userData.baseRgb) return;
+      const base = child.userData.baseRgb;
+      if (!palette) {
+        child.material.color.setRGB(base[0] / 255, base[1] / 255, base[2] / 255);
+        return;
+      }
+      const role = classifyCadPartRole(base, child.userData.bodyIdx);
+      if (role && palette[role] !== undefined) {
+        child.material.color.setHex(palette[role]);
+      } else {
+        child.material.color.setRGB(base[0] / 255, base[1] / 255, base[2] / 255);
+      }
+    });
+  }
+
+  function applyJointsToCadGroups(groups, joints15) {
+    if (!groups || !groups.length) return;
+    const tmpQ = new THREE.Quaternion();
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      g.quaternion.copy(g.userData.baseQuat);
+      const j = g.userData.jointIdx;
+      if (j >= 0 && j < joints15.length) {
+        tmpQ.setFromAxisAngle(g.userData.axis, joints15[j]);
+        g.quaternion.multiply(tmpQ);
+      }
+    }
+  }
+
+  // Load ground-truth CAD rig & FLUX AI GLB
+  fetch("assets/models/microduck_cad_rig.json")
+    .then((r) => r.json())
+    .then((rig) => {
+      cadRigData = rig;
+      cadBodyGroups = buildCadRigInThree(rig, duckCadContainer);
+      // Shift Z-up container slightly so Home Pose feet rest flush on Y=0
+      const footOffset = rig.home_pose_stats ? rig.home_pose_stats.foot_offset_y : 0;
+      duckCadContainer.position.y = footOffset;
+      applyJointsToCadGroups(cadBodyGroups, state.joints);
+      const selectColorway = document.getElementById("select-colorway");
+      applyColorway(duckCadContainer, selectColorway ? selectColorway.value : "white_orange");
+      tryAttachRollerWheels();
+      pushLog("CAD", `Loaded duck.bin rig (${rig.bodies.length} bodies, ${rig.parts.length} parts).`);
+
+      // Build 3 companion ducks for the 4-Duck Chorale with distinct authentic hardware colorways
+      const choirOffsets = [
+        { x: -0.35, z: -0.18, yaw: 0.45, colorway: "sky_blue" },
+        { x: 0.35, z: -0.18, yaw: -0.45, colorway: "lavender_yellow" },
+        { x: 0.0, z: -0.38, yaw: 0.0, colorway: "slate_purple" },
+      ];
+      choirOffsets.forEach((cfg) => {
+        const cRoot = new THREE.Group();
+        cRoot.position.set(cfg.x, 0, cfg.z);
+        cRoot.rotation.y = cfg.yaw;
+        const cCad = new THREE.Group();
+        cCad.rotation.x = -Math.PI / 2;
+        cCad.position.y = footOffset;
+        cRoot.add(cCad);
+        const cGroups = buildCadRigInThree(rig, cCad);
+        applyJointsToCadGroups(cGroups, DEFAULT_POSITION);
+        applyColorway(cCad, cfg.colorway);
+        choirGroup.add(cRoot);
+      });
+    })
+    .catch((err) => pushLog("ERR", `CAD rig load failed: ${err}`));
+
+  fetch("assets/models/xgoduck_v5_tire.json")
+    .then((r) => r.json())
+    .then((tire) => {
+      tireAssetData = tire;
+      tryAttachRollerWheels();
+    })
+    .catch((err) => pushLog("STL", `Roller wheel STL pending: ${err}`));
+
+  const gltfLoader = new THREE.GLTFLoader();
+  gltfLoader.load(
+    "assets/models/xgoduck_v5_stl_kit.glb",
+    (gltf) => {
+      const model = gltf.scene;
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      fluxAiContainer.add(model);
+      pushLog("STL-KIT", "Loaded XGO-Duck V5 50-STL Kit Platter (xgoduck_v5_stl_kit.glb).");
+    },
+    undefined,
+    () => {
+      pushLog("STL-KIT", "XGO-Duck V5 STL Kit GLB not loaded; articulated CAD rig active.");
+    }
+  );
+
+  // Raycast click on arena floor to move Laser Dot
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  let pointerDownPos = { x: 0, y: 0 };
+  canvas3d.addEventListener("pointerdown", (e) => {
+    pointerDownPos = { x: e.clientX, y: e.clientY };
+  });
+  canvas3d.addEventListener("pointerup", (e) => {
+    const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+    if (dist > 5) return; // Was an orbit drag
+    const rect = canvas3d.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(floorMesh);
+    if (hits.length > 0) {
+      const pt = hits[0].point;
+      state.laser.x = Math.max(-2.5, Math.min(2.5, pt.x));
+      state.laser.z = Math.max(-2.5, Math.min(2.5, pt.z));
+      state.laser.active = true;
+      laserDotMesh.position.set(state.laser.x, 0.004, state.laser.z);
+      laserDotMesh.visible = true;
+      pushLog("mediad", `Laser dot placed at (${state.laser.x.toFixed(2)}, ${state.laser.z.toFixed(2)}) m`);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 6. Real Emotions Loader (JSON keyframes + WAV audio)
+  // ---------------------------------------------------------------------------
+  async function playRealEmotion(name) {
+    try {
+      const resp = await fetch(`assets/emotions/${name}.json`);
+      const data = await resp.json();
+      const kfs = data.keyframes || [];
+      if (!kfs.length) return;
+      state.activeEmotion = {
+        name,
+        keyframes: kfs,
+        elapsed: 0,
+        duration: kfs[kfs.length - 1].t || 2.0,
+      };
+      state.vetbook.emotionsPlayed += 1;
+      const audio = new Audio(`assets/emotions/${name}.wav`);
+      audio.play().catch(() => playProceduralQuack(1.1));
+      pushLog("robotd", `Emotion "${name}" (${state.activeEmotion.duration.toFixed(1)}s, ${kfs.length} keyframes)`);
+    } catch (err) {
+      pushLog("ERR", `Failed to load emotion ${name}: ${err}`);
+    }
+  }
+
+  function sampleEmotion(em, t) {
+    const kfs = em.keyframes;
+    if (t <= kfs[0].t) return kfs[0];
+    if (t >= kfs[kfs.length - 1].t) return kfs[kfs.length - 1];
+    for (let i = 0; i < kfs.length - 1; i++) {
+      const a = kfs[i];
+      const b = kfs[i + 1];
+      if (t >= a.t && t <= b.t) {
+        const u = (t - a.t) / Math.max(1e-5, b.t - a.t);
+        const lerp = (k) => (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * u;
+        return {
+          neck: lerp("neck"),
+          head_pitch: lerp("head_pitch"),
+          head_yaw: lerp("head_yaw"),
+          head_roll: lerp("head_roll"),
+          body_pitch: lerp("body_pitch"),
+          body_z: lerp("body_z"),
+          mouth: lerp("mouth"),
+          skill: b.skill || a.skill,
+        };
+      }
+    }
+    return kfs[kfs.length - 1];
+  }
+
+  // ---------------------------------------------------------------------------
+  // 7. 50 Hz Closed-Loop Physics, Observation & UI Telemetry Step
+  // ---------------------------------------------------------------------------
+  const tofCells = [];
+  for (let i = 0; i < 64; i++) {
+    const c = document.createElement("div");
+    c.className = "tof-cell";
+    c.textContent = "·";
+    tofGrid.appendChild(c);
+    tofCells.push(c);
+  }
+
+  const jointRows = [];
+  JOINT_NAMES.forEach((name, idx) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${JOINT_IDS[idx]}</td><td>${name}</td><td class="ang">0.0°</td><td class="grd">0</td>`;
+    jointsTbody.appendChild(tr);
+    jointRows.push({
+      ang: tr.querySelector(".ang"),
+      grd: tr.querySelector(".grd"),
+    });
+  });
+
+  function updateAutonomousBrain(dt) {
+    if (state.brainMode === "laser" && state.laser.active) {
+      const dx = state.laser.x - state.pose.x;
+      const dz = state.laser.z - state.pose.z;
+      const dist = Math.hypot(dx, dz);
+      // In Three.js Y-up, forward is +X when yaw=0, +Z is right (-Y in Z-up)
+      const desiredYaw = Math.atan2(-dz, dx);
+      let errYaw = desiredYaw - state.pose.yaw;
+      while (errYaw > Math.PI) errYaw -= 2 * Math.PI;
+      while (errYaw < -Math.PI) errYaw += 2 * Math.PI;
+
+      state.cmd.headYaw = Math.max(-1.0, Math.min(1.0, errYaw));
+      state.cmd.headPitch = dist < 0.8 ? 0.35 : 0.15;
+      if (dist > 0.16) {
+        state.cmd.vx = Math.min(0.28, dist * 0.45);
+        state.cmd.vyaw = Math.max(-1.0, Math.min(1.0, errYaw * 1.6));
+      } else {
+        state.cmd.vx = 0;
+        state.cmd.vyaw = 0;
+      }
+    } else if (state.brainMode === "soccer") {
+      const dx = state.ball.x - state.pose.x;
+      const dz = state.ball.z - state.pose.z;
+      const dist = Math.hypot(dx, dz);
+      const desiredYaw = Math.atan2(-dz, dx);
+      let errYaw = desiredYaw - state.pose.yaw;
+      while (errYaw > Math.PI) errYaw -= 2 * Math.PI;
+      while (errYaw < -Math.PI) errYaw += 2 * Math.PI;
+
+      state.cmd.headYaw = Math.max(-1.0, Math.min(1.0, errYaw));
+      state.cmd.headPitch = 0.42;
+      if (dist > 0.17) {
+        state.cmd.vx = Math.abs(errYaw) < 0.4 ? 0.25 : 0.06;
+        state.cmd.vyaw = Math.max(-1.0, Math.min(1.0, errYaw * 1.8));
+      } else {
+        state.cmd.vx = 0;
+        state.cmd.vyaw = 0;
+        if (!state.activeSkill) {
+          triggerSkill("kick_left");
+          // Kick the ball forward along duck heading
+          const fwdX = Math.cos(state.pose.yaw);
+          const fwdZ = -Math.sin(state.pose.yaw);
+          state.ball.vx = fwdX * 1.35;
+          state.ball.vz = fwdZ * 1.35;
+          state.vetbook.kicks += 1;
+          pushLog("soccer", `Kick executed! Ball launched (${state.vetbook.kicks} total kicks).`);
+        }
+      }
+    } else if (state.brainMode === "autod") {
+      state.autodTimer += dt;
+      if (state.autodTimer > 3.5) {
+        state.autodTimer = 0;
+        const moods = ["Wander", "LookAround", "Groom", "Wander"];
+        state.autodState = moods[Math.floor(Math.random() * moods.length)];
+        if (state.autodState === "Wander") {
+          state.autodGoal = {
+            x: (Math.random() - 0.5) * 2.2,
+            z: (Math.random() - 0.5) * 2.2,
+          };
+        }
+        pushLog("autod", `State -> ${state.autodState}`);
+      }
+      if (state.autodState === "Wander") {
+        const dx = state.autodGoal.x - state.pose.x;
+        const dz = state.autodGoal.z - state.pose.z;
+        const d = Math.hypot(dx, dz);
+        const yawTarget = Math.atan2(-dz, dx);
+        let err = yawTarget - state.pose.yaw;
+        while (err > Math.PI) err -= 2 * Math.PI;
+        while (err < -Math.PI) err += 2 * Math.PI;
+        state.cmd.vx = d > 0.15 ? 0.20 : 0;
+        state.cmd.vyaw = Math.max(-0.8, Math.min(0.8, err * 1.3));
+        state.cmd.headYaw = Math.sin(state.time * 1.4) * 0.4;
+      } else if (state.autodState === "LookAround") {
+        state.cmd.vx = 0;
+        state.cmd.vyaw = 0;
+        state.cmd.headYaw = Math.sin(state.time * 1.8) * 0.65;
+        state.cmd.headPitch = Math.cos(state.time * 1.3) * 0.25;
+      } else {
+        state.cmd.vx = 0;
+        state.cmd.vyaw = 0;
+        state.cmd.headRoll = Math.sin(state.time * 4.0) * 0.25;
+        state.cmd.neckPitch = 0.2;
+      }
+    }
+  }
+
+  function stepSimulation(dt) {
+    state.time += dt;
+    updateAutonomousBrain(dt);
+
+    // Ball physics
+    if (Math.hypot(state.ball.vx, state.ball.vz) > 0.005) {
+      state.ball.x += state.ball.vx * dt;
+      state.ball.z += state.ball.vz * dt;
+      state.ball.vx *= 0.96;
+      state.ball.vz *= 0.96;
+      if (Math.abs(state.ball.x) > 2.6) state.ball.vx *= -0.7;
+      if (Math.abs(state.ball.z) > 2.6) state.ball.vz *= -0.7;
+      ballMesh.position.set(state.ball.x, 0.042, state.ball.z);
+    }
+
+    // Theremin computation
+    let mouthOpen = state.cmd.mouthOpen;
+    if (state.thereminOn) {
+      const d = Number(sliderTheremin.value);
+      if (d >= 0.08 && d <= 0.60) {
+        const norm = (0.60 - d) / (0.60 - 0.08);
+        const freq = 220 * Math.pow(2, norm * 1.5);
+        thereminHz.textContent = `${freq.toFixed(1)} Hz`;
+        mouthOpen = norm;
+        updateThereminAudio(true, freq);
+      } else {
+        thereminHz.textContent = "SILENT (>60cm)";
+        mouthOpen = 0;
+        updateThereminAudio(false, 0);
+      }
+    } else {
+      thereminHz.textContent = "OFF";
+    }
+
+    // Compute 14-D action offsets
+    const action14 = new Array(14).fill(0);
+    const speed = Math.hypot(state.cmd.vx, state.cmd.vy, state.cmd.vyaw);
+
+    if (state.isResting) {
+      for (let i = 0; i < 15; i++) {
+        state.joints[i] += (REST_POSITION[i] - state.joints[i]) * 0.12;
+      }
+      state.pose.liftY += (-0.055 - state.pose.liftY) * 0.12;
+    } else if (state.isPickedUp) {
+      state.pickupElapsed += dt;
+      const t = Math.min(1, state.pickupElapsed / 0.30);
+      let sIdx = 0;
+      for (let i = 0; i < 15; i++) {
+        if (i === MOUTH_INDEX) {
+          state.joints[i] = mouthTarget(mouthOpen);
+        } else {
+          const target = DEFAULT_POSITION[i] + PAUSE_POSE_OFFSETS[sIdx];
+          state.joints[i] = state.pickupStartPose[i] + (target - state.pickupStartPose[i]) * t;
+          action14[sIdx] = state.joints[i] - DEFAULT_POSITION[i];
+          sIdx++;
+        }
+      }
+      state.pose.liftY += (0.14 - state.pose.liftY) * 0.12;
+    } else if (state.isFallen) {
+      state.pose.pitchFall += (1.38 - state.pose.pitchFall) * 0.14;
+      state.pose.liftY += (-0.04 - state.pose.liftY) * 0.14;
+    } else {
+      state.pose.pitchFall *= 0.85;
+      state.pose.rollFall *= 0.85;
+      state.pose.liftY += ((state.isSeated ? -0.05 : 0.0) - state.pose.liftY) * 0.15;
+
+      // Walking / Roller locomotion cycle
+      if (!state.isSeated && speed > 0.01) {
+        if (state.locomotionMode === "roller") {
+          // Crouch and glide smoothly
+          action14[2] = -0.22;
+          action14[3] = 0.45;
+          action14[4] = -0.22;
+          action14[11] = 0.22;
+          action14[12] = -0.45;
+          action14[13] = 0.22;
+        } else {
+          const phase = state.time * 8.0;
+          const swing = Math.min(0.32, speed * 0.72);
+          const s = Math.sin(phase);
+          const c = Math.cos(phase);
+          action14[0] = state.cmd.vyaw * 0.16 * s;
+          action14[1] = state.cmd.vy * 0.25 + 0.055 * c;
+          action14[2] = swing * s;
+          action14[3] = Math.max(0, -swing * c) * 1.15;
+          action14[4] = -0.5 * swing * s;
+
+          action14[9] = -state.cmd.vyaw * 0.16 * s;
+          action14[10] = state.cmd.vy * 0.25 - 0.055 * c;
+          action14[11] = swing * s;
+          action14[12] = -Math.max(0, swing * c) * 1.15;
+          action14[13] = -0.5 * swing * s;
+        }
+
+        // Update world odometry
+        state.pose.yaw += state.cmd.vyaw * dt;
+        const cosY = Math.cos(state.pose.yaw);
+        const sinY = Math.sin(state.pose.yaw);
+        const dx = (state.cmd.vx * cosY + state.cmd.vy * sinY) * dt;
+        const dz = (-state.cmd.vx * sinY + state.cmd.vy * cosY) * dt;
+        state.pose.x += dx;
+        state.pose.z += dz;
+        state.vetbook.metersWalked += Math.hypot(dx, dz);
+      }
+
+      // Seated posture
+      if (state.isSeated) {
+        action14[2] = -0.35;
+        action14[3] = 1.25;
+        action14[4] = -0.65;
+        action14[11] = 0.35;
+        action14[12] = -1.25;
+        action14[13] = 0.65;
+      }
+
+      // Active one-shot skill overlay
+      if (state.activeSkill) {
+        state.activeSkill.elapsed += dt;
+        const p = Math.min(1, state.activeSkill.elapsed / state.activeSkill.duration);
+        const bell = Math.sin(p * Math.PI);
+        const nm = state.activeSkill.name;
+        if (nm === "ground_pick") {
+          action14[5] = 0.65 * bell;
+          action14[6] = 0.45 * bell;
+          action14[2] = -0.35 * bell;
+          action14[11] = 0.35 * bell;
+        } else if (nm === "kick_left") {
+          action14[2] = -0.75 * bell;
+          action14[3] = 0.55 * bell;
+        } else if (nm === "kick_right") {
+          action14[11] = 0.75 * bell;
+          action14[12] = -0.55 * bell;
+        } else if (nm === "polite_bow") {
+          action14[5] = 0.72 * bell;
+          action14[6] = 0.52 * bell;
+        } else if (nm === "flamingo") {
+          action14[1] = -0.25 * bell;
+          action14[2] = -0.6 * bell;
+          action14[3] = 0.95 * bell;
+        } else if (nm === "roulade") {
+          state.pose.pitchFall = p * Math.PI * 2;
+        }
+        if (p >= 1) {
+          state.pose.pitchFall = 0;
+          state.activeSkill = null;
+        }
+      }
+
+      // Head commands (indices 5..8)
+      action14[5] += state.cmd.neckPitch;
+      action14[6] += state.cmd.headPitch;
+      action14[7] += state.cmd.headYaw;
+      action14[8] += state.cmd.headRoll;
+
+      // Active Emotion keyframe override
+      if (state.activeEmotion) {
+        state.activeEmotion.elapsed += dt;
+        const kf = sampleEmotion(state.activeEmotion, state.activeEmotion.elapsed);
+        action14[5] = kf.neck || 0;
+        action14[6] = kf.head_pitch || 0;
+        action14[7] = kf.head_yaw || 0;
+        action14[8] = kf.head_roll || 0;
+        mouthOpen = kf.mouth || 0;
+        if (state.activeEmotion.elapsed >= state.activeEmotion.duration) {
+          state.activeEmotion = null;
+        }
+      }
+
+      // Scatter 14 actions -> 15 joints
+      let src = 0;
+      for (let i = 0; i < 15; i++) {
+        if (i === MOUTH_INDEX) {
+          const next = mouthTarget(mouthOpen);
+          state.velocities[i] = (next - state.joints[i]) / dt;
+          state.joints[i] = next;
+        } else {
+          const next = Math.max(-Math.PI, Math.min(Math.PI, DEFAULT_POSITION[i] + action14[src]));
+          state.velocities[i] = (next - state.joints[i]) / dt;
+          state.joints[i] = next;
+          src++;
+        }
+      }
+    }
+
+    // Populate exact 61-D observation vector
+    const gravZ = state.isFallen ? -0.35 : -1.0;
+    const gravX = state.isFallen ? 0.85 : 0.0;
+    state.obs61[0] = 0;
+    state.obs61[1] = 0;
+    state.obs61[2] = state.cmd.vyaw;
+    state.obs61[3] = gravX;
+    state.obs61[4] = 0;
+    state.obs61[5] = gravZ;
+    let sIdx = 0;
+    for (let i = 0; i < 15; i++) {
+      if (i === MOUTH_INDEX) continue;
+      state.obs61[6 + sIdx] = state.joints[i] - DEFAULT_POSITION[i];
+      state.obs61[20 + sIdx] = state.velocities[i];
+      state.obs61[34 + sIdx] = state.prevAction14[sIdx];
+      sIdx++;
+    }
+    state.obs61[48] = state.cmd.vx;
+    state.obs61[49] = state.cmd.vy;
+    state.obs61[50] = state.cmd.vyaw;
+    state.obs61[51] = state.cmd.neckPitch;
+    state.obs61[52] = state.cmd.headPitch;
+    state.obs61[53] = state.cmd.headYaw;
+    state.obs61[54] = state.cmd.headRoll;
+    state.obs61[55] = 0;
+    state.obs61[56] = 0;
+    state.obs61[57] = state.cmd.bodyZ;
+    state.obs61[58] = state.cmd.bodyRoll;
+    state.obs61[59] = state.cmd.bodyPitch;
+    state.obs61[60] = 0;
+    state.prevAction14 = [...action14];
+
+    // Update Three.js transforms
+    duckWorldRoot.position.set(state.pose.x, state.pose.liftY, state.pose.z);
+    duckWorldRoot.rotation.set(state.pose.rollFall, state.pose.yaw, -state.pose.pitchFall);
+    shadowDisc.position.set(state.pose.x, 0.002, state.pose.z);
+    shadowDisc.material.opacity = Math.max(0.12, 0.45 - state.pose.liftY * 1.5);
+
+    if (state.activeMesh === "cad") {
+      applyJointsToCadGroups(cadBodyGroups, state.joints);
+      const showRoller = state.locomotionMode === "roller" || state.rollerSkatesForced;
+      for (let i = 0; i < rollerWheels.length; i++) {
+        const w = rollerWheels[i];
+        w.visible = showRoller;
+        if (showRoller && Math.abs(state.cmd.vx) > 0.005) {
+          w.rotation.z -= (state.cmd.vx * dt) / Math.max(0.012, w.userData.radius || 0.015);
+        }
+      }
+    } else {
+      fluxAiContainer.position.y = 0;
+      fluxAiContainer.rotation.y = 0;
+    }
+
+    updateTofMatrix();
+    updateFaceLeds();
+  }
+
+  function updateTofMatrix() {
+    tofMarkersGroup.visible = state.showTofRays;
+    const headYaw = state.pose.yaw + state.joints[7];
+    const headPitch = 0.25 + state.joints[5] + state.joints[6];
+    const originX = state.pose.x + Math.cos(headYaw) * 0.08;
+    const originY = 0.21 + state.pose.liftY;
+    const originZ = state.pose.z - Math.sin(headYaw) * 0.08;
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const idx = r * 8 + c;
+        const azOff = ((c - 3.5) / 3.5) * 0.39; // ~45 deg FOV
+        const elOff = ((r - 3.5) / 3.5) * 0.39;
+        const rayYaw = headYaw - azOff;
+        const rayPitch = headPitch + elOff;
+        const dirY = -Math.sin(rayPitch);
+
+        let dist = 1.8;
+        let isHit = false;
+        if (state.thereminOn && r >= 2 && r <= 5 && c >= 2 && c <= 5) {
+          dist = Number(sliderTheremin.value);
+          isHit = true;
+        } else if (dirY < -0.05) {
+          const floorDist = originY / -dirY;
+          if (floorDist > 0.08 && floorDist < 2.2) {
+            dist = floorDist;
+          }
+        }
+
+        const px = originX + Math.cos(rayYaw) * Math.cos(rayPitch) * dist;
+        const py = Math.max(0.006, originY + dirY * dist);
+        const pz = originZ - Math.sin(rayYaw) * Math.cos(rayPitch) * dist;
+
+        const m = tofMarkerMeshes[idx];
+        m.position.set(px, py, pz);
+        m.material.color.setHex(isHit ? 0xf5b700 : 0x22d3ee);
+
+        const cell = tofCells[idx];
+        if (dist > 1.7) {
+          cell.style.background = "#0f172a";
+          cell.style.color = "#475569";
+          cell.textContent = "·";
+        } else {
+          const norm = Math.max(0, Math.min(1, (dist - 0.1) / 1.4));
+          const hue = Math.round(20 + norm * 170);
+          cell.style.background = `hsl(${hue}, 85%, 55%)`;
+          cell.style.color = "#090d14";
+          cell.textContent = dist.toFixed(1);
+        }
+      }
+    }
+  }
+
+  function updateFaceLeds() {
+    const ledStatus = document.getElementById("led-status");
+    const ledNet = document.getElementById("led-net");
+    const ledCam = document.getElementById("led-cam");
+    const ledFlash = document.getElementById("led-flash");
+    const ledBat1 = document.getElementById("led-bat1");
+    const ledBat2 = document.getElementById("led-bat2");
+    const ledBat3 = document.getElementById("led-bat3");
+
+    ledStatus.style.background = state.isFallen ? "#f43f5e" : "#10b981";
+    ledNet.style.background = state.choraleOn ? "#38bdf8" : "#10b981";
+    ledCam.style.background = state.brainMode !== "manual" ? "#ef4444" : "#334155";
+    ledFlash.style.background = state.laser.active ? "#f5b700" : "#334155";
+    ledBat1.style.background = "#10b981";
+    ledBat2.style.background = "#10b981";
+    ledBat3.style.background = "#10b981";
+  }
+
+  function drawObsHeatmap() {
+    const w = obsCanvas.width;
+    const h = obsCanvas.height;
+    obsCtx.fillStyle = "#060911";
+    obsCtx.fillRect(0, 0, w, h);
+
+    const cellW = w / 61;
+    for (let i = 0; i < 61; i++) {
+      const v = state.obs61[i];
+      const mag = Math.min(1, Math.abs(v) / 1.5);
+      obsCtx.fillStyle = v >= 0
+        ? `rgba(34, 211, 238, ${0.15 + mag * 0.85})`
+        : `rgba(244, 63, 94, ${0.15 + mag * 0.85})`;
+      const barH = Math.max(4, mag * (h - 14));
+      obsCtx.fillRect(i * cellW + 1, h - barH - 4, cellW - 2, barH);
+    }
+  }
+
+  function updateDomTelemetry() {
+    mOdom.textContent = `${state.pose.x.toFixed(2)}, ${state.pose.z.toFixed(2)} m`;
+    mBrain.textContent = state.activeEmotion
+      ? `EMOTION: ${state.activeEmotion.name.toUpperCase()}`
+      : state.activeSkill
+        ? `SKILL: ${state.activeSkill.name.toUpperCase()}`
+        : `${state.brainMode.toUpperCase()} (${state.locomotionMode.toUpperCase()})`;
+
+    if (state.isFallen) {
+      mSafety.textContent = "FALLEN · LIMP";
+      pillHealth.className = "pill pill-danger";
+      pillHealth.textContent = "HEALTH: FALLEN (DEGRADED)";
+    } else if (state.isPickedUp) {
+      mSafety.textContent = "PICKED UP · PAUSE_POSE";
+      pillHealth.className = "pill pill-warn";
+      pillHealth.textContent = "HEALTH: HELD (63-D CNN)";
+    } else {
+      mSafety.textContent = `UPRIGHT · GUARD ${state.guardLevel}`;
+      pillHealth.className = "pill pill-ok";
+      pillHealth.textContent = "HEALTH: HEALTHY (50.0 Hz)";
+    }
+
+    mTrips.textContent = `${state.fallTrips} trips · ${state.fallCount} falls`;
+    pillMode.textContent = `MODE: ${state.locomotionMode.toUpperCase()}`;
+
+    for (let i = 0; i < 15; i++) {
+      const deg = (state.joints[i] * 180) / Math.PI;
+      jointRows[i].ang.textContent = `${deg.toFixed(1)}°`;
+      jointRows[i].grd.textContent = String(state.impactGuardStates[i]);
+    }
+
+    drawObsHeatmap();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 8. Skills & Event Bindings
+  // ---------------------------------------------------------------------------
+  function triggerSkill(name) {
+    if (name === "walk" || name === "roller") {
+      state.locomotionMode = name;
+      state.isSeated = false;
+      state.isResting = false;
+      skillStatusTag.textContent = name === "walk" ? "velstand.onnx" : "roller.onnx";
+      playProceduralQuack(name === "walk" ? 1.0 : 1.18);
+      pushLog("robotd", `Switched mode to ${name}.`);
+      return;
+    }
+    if (name === "sit_toggle") {
+      state.isSeated = !state.isSeated;
+      state.isResting = false;
+      pushLog("robotd", `sitstand.onnx -> ${state.isSeated ? "SEATED" : "STANDING"}`);
+      return;
+    }
+    const durations = {
+      ground_pick: 2.8,
+      kick_left: 0.5,
+      kick_right: 0.5,
+      roulade: 1.0,
+      polite_bow: 3.0,
+      flamingo: 3.5,
+    };
+    state.activeSkill = { name, elapsed: 0, duration: durations[name] || 1.5 };
+    pushLog("robotd", `robot.do "${name}" (${state.activeSkill.duration.toFixed(1)}s)`);
+  }
+
+  document.querySelectorAll("[data-skill]").forEach((btn) => {
+    btn.addEventListener("click", () => triggerSkill(btn.dataset.skill));
+  });
+
+  document.querySelectorAll("[data-dpad]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-dpad]").forEach((b) => b.classList.remove("active-mode"));
+      btn.classList.add("active-mode");
+      state.dpadMode = btn.dataset.dpad;
+      pushLog("padd", `D-pad stick mapping -> ${state.dpadMode}`);
+    });
+  });
+
+  sliderVx.addEventListener("input", () => {
+    state.cmd.vx = Number(sliderVx.value);
+    valVx.textContent = `${state.cmd.vx.toFixed(2)} m/s`;
+  });
+  sliderVy.addEventListener("input", () => {
+    state.cmd.vy = Number(sliderVy.value);
+    valVy.textContent = `${state.cmd.vy.toFixed(2)} m/s`;
+  });
+  sliderVyaw.addEventListener("input", () => {
+    state.cmd.vyaw = Number(sliderVyaw.value);
+    valVyaw.textContent = `${state.cmd.vyaw.toFixed(2)} rad/s`;
+  });
+  sliderHeadYaw.addEventListener("input", () => {
+    state.cmd.headYaw = Number(sliderHeadYaw.value);
+    valHeadYaw.textContent = `${state.cmd.headYaw.toFixed(2)} rad`;
+  });
+  sliderHeadPitch.addEventListener("input", () => {
+    state.cmd.headPitch = Number(sliderHeadPitch.value);
+    valHeadPitch.textContent = `${state.cmd.headPitch.toFixed(2)} rad`;
+  });
+  sliderMouth.addEventListener("input", () => {
+    state.cmd.mouthOpen = Number(sliderMouth.value);
+    valMouth.textContent = `${Math.round(state.cmd.mouthOpen * 100)}%`;
+  });
+  sliderTheremin.addEventListener("input", () => {
+    valTheremin.textContent = `${Number(sliderTheremin.value).toFixed(2)} m`;
+  });
+
+  document.getElementById("btn-stop-vel").addEventListener("click", () => {
+    state.cmd.vx = 0;
+    state.cmd.vy = 0;
+    state.cmd.vyaw = 0;
+    sliderVx.value = 0;
+    sliderVy.value = 0;
+    sliderVyaw.value = 0;
+    valVx.textContent = "0.00 m/s";
+    valVy.textContent = "0.00 m/s";
+    valVyaw.textContent = "0.00 rad/s";
+    state.brainMode = "manual";
+  });
+
+  document.getElementById("btn-quack").addEventListener("click", () => playProceduralQuack(1.0));
+  document.getElementById("btn-play-emotion").addEventListener("click", () => {
+    playRealEmotion(document.getElementById("select-emotion").value);
+  });
+
+  selectGuard.addEventListener("change", () => {
+    state.guardLevel = selectGuard.value;
+    pushLog("bus", `Impact Guard profile set to Level ${state.guardLevel}`);
+  });
+
+  document.getElementById("btn-push-test").addEventListener("click", () => {
+    if (state.guardLevel === "5") {
+      state.fallTrips += 6;
+      state.fallCount += 1;
+      state.vetbook.falls += 1;
+      state.isFallen = true;
+      state.impactGuardStates[3] = 2;
+      state.impactGuardStates[13] = 2;
+      pushLog("ALERT", "Level 5 Impact Guard fired 6x on stance knees (500 mA soft hold) -> STANCE COLLAPSE!");
+    } else {
+      state.fallTrips += 1;
+      state.impactGuardStates[3] = 1;
+      setTimeout(() => { state.impactGuardStates[3] = 0; }, 250);
+      pushLog("safety", `Level ${state.guardLevel} absorbed 7.5 rad/s push impulse cleanly (upright).`);
+    }
+  });
+
+  document.getElementById("btn-pickup-toggle").addEventListener("click", () => {
+    state.isPickedUp = !state.isPickedUp;
+    if (state.isPickedUp) {
+      state.pickupStartPose = [...state.joints];
+      state.pickupElapsed = 0;
+      state.vetbook.pickups += 1;
+      pushLog("pickup", "picked up — pausing policy (300 ms ramp to PAUSE_POSE)");
+    } else {
+      pushLog("pickup", "put down — handing robot back to velstand.onnx");
+    }
+  });
+
+  document.getElementById("btn-relax").addEventListener("click", () => {
+    state.isResting = !state.isResting;
+    state.isFallen = false;
+    state.impactGuardStates.fill(0);
+    pushLog("robotd", state.isResting ? "Easing to REST_POSITION" : "Standing back up to HOME");
+  });
+
+  document.getElementById("btn-reset-pos").addEventListener("click", () => {
+    state.pose = { x: 0, z: 0, yaw: 0, liftY: 0, pitchFall: 0, rollFall: 0 };
+    state.isFallen = false;
+    state.isPickedUp = false;
+    state.isSeated = false;
+    state.isResting = false;
+    state.joints = [...DEFAULT_POSITION];
+    state.impactGuardStates.fill(0);
+    state.brainMode = "manual";
+    pushLog("robotd", "Reset robot to HOME pose at arena origin (0, 0).");
+  });
+
+  function toggleMeshMode() {
+    if (state.activeMesh === "cad") {
+      state.activeMesh = "flux_ai";
+      duckCadContainer.visible = false;
+      fluxAiContainer.visible = true;
+      btnToggleMesh.textContent = "[M] Rig: XGO-Duck V5 STL Kit (50 STLs)";
+      pushLog("view", "Switched to XGO-Duck V5 50-STL Printable Kit Platter.");
+    } else {
+      state.activeMesh = "cad";
+      duckCadContainer.visible = true;
+      fluxAiContainer.visible = false;
+      btnToggleMesh.textContent = "[M] Rig: Articulated CAD (duck.bin)";
+      pushLog("view", "Switched to Articulated CAD Rig (duck.bin).");
+    }
+  }
+  btnToggleMesh.addEventListener("click", toggleMeshMode);
+
+  const btnToggleRollerSkates = document.getElementById("btn-toggle-roller-skates");
+  if (btnToggleRollerSkates) {
+    btnToggleRollerSkates.addEventListener("click", () => {
+      state.rollerSkatesForced = !state.rollerSkatesForced;
+      btnToggleRollerSkates.classList.toggle("active", state.rollerSkatesForced);
+      pushLog("STL", `Roller Skates (V5_AUDIO_VIDEO_TIRE_01.stl) ${state.rollerSkatesForced ? "MOUNTED" : "AUTO (Roller mode only)"}`);
+    });
+  }
+
+  btnToggleTofRays.addEventListener("click", () => {
+    state.showTofRays = !state.showTofRays;
+    btnToggleTofRays.classList.toggle("active", state.showTofRays);
+  });
+
+  btnCamFollow.addEventListener("click", () => {
+    state.followCam = !state.followCam;
+    btnCamFollow.classList.toggle("active", state.followCam);
+  });
+
+  function setBrain(mode) {
+    state.brainMode = state.brainMode === mode ? "manual" : mode;
+    btnModeAutod.classList.toggle("active", state.brainMode === "autod");
+    btnModeLaser.classList.toggle("active", state.brainMode === "laser");
+    btnModeSoccer.classList.toggle("active", state.brainMode === "soccer");
+    if (state.brainMode === "laser" && !state.laser.active) {
+      state.laser.active = true;
+      laserDotMesh.visible = true;
+    }
+    pushLog("brain", `Active brain -> ${state.brainMode}`);
+  }
+  btnModeAutod.addEventListener("click", () => setBrain("autod"));
+  btnModeLaser.addEventListener("click", () => setBrain("laser"));
+  btnModeSoccer.addEventListener("click", () => setBrain("soccer"));
+
+  btnTheremin.addEventListener("click", () => {
+    state.thereminOn = !state.thereminOn;
+    btnTheremin.textContent = state.thereminOn ? "Disable Theremin" : "Enable ToF Theremin Audio";
+    btnTheremin.classList.toggle("active-mode", state.thereminOn);
+    if (!state.thereminOn) updateThereminAudio(false, 0);
+    pushLog("tofd", `ToF Theremin ${state.thereminOn ? "ACTIVE" : "OFF"}`);
+  });
+
+  document.getElementById("btn-chorale").addEventListener("click", () => {
+    if (state.choraleOn) return;
+    state.choraleOn = true;
+    choirGroup.visible = true;
+    state.vetbook.songsSung += 1;
+    let step = 0;
+    const playStep = () => {
+      if (!state.choraleOn) return;
+      const chord = WISTFUL_CHORDS_HZ[step % WISTFUL_CHORDS_HZ.length];
+      playChoraleChord(chord);
+      state.choraleTick += 4;
+      choraleBeat.textContent = `4 VOICES · BEAT ${state.choraleTick}`;
+      state.cmd.mouthOpen = 0.6;
+      setTimeout(() => { if (state.choraleOn) state.cmd.mouthOpen = 0.15; }, 500);
+      step++;
+    };
+    playStep();
+    choraleInterval = setInterval(playStep, 1200);
+    pushLog("btd/chorale", "4-Duck BLE Chorale started: singing wistful.duckscore (±20ms sync).");
+  });
+
+  document.getElementById("btn-chorale-stop").addEventListener("click", () => {
+    state.choraleOn = false;
+    choirGroup.visible = false;
+    if (choraleInterval) clearInterval(choraleInterval);
+    choraleBeat.textContent = "IDLE";
+    state.cmd.mouthOpen = 0;
+    pushLog("btd/chorale", "Chorale stopped.");
+  });
+
+  // Keyboard shortcuts
+  window.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    const k = e.key.toLowerCase();
+    if (k === "m") toggleMeshMode();
+    if (k === "w" || e.key === "ArrowUp") state.cmd.vx = 0.30;
+    if (k === "s" || e.key === "ArrowDown") state.cmd.vx = -0.20;
+    if (k === "a" || e.key === "ArrowLeft") state.cmd.vyaw = 0.80;
+    if (k === "d" || e.key === "ArrowRight") state.cmd.vyaw = -0.80;
+    if (k === " ") {
+      e.preventDefault();
+      playProceduralQuack(1.0);
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    const k = e.key.toLowerCase();
+    if (["w", "s", "arrowup", "arrowdown"].includes(k)) state.cmd.vx = 0;
+    if (["a", "d", "arrowleft", "arrowright"].includes(k)) state.cmd.vyaw = 0;
+  });
+
+  // Modals (FLUX Gallery, Cheat Sheet, VetBook)
+  const modalFlux = document.getElementById("modal-flux");
+  const modalCheat = document.getElementById("modal-cheat");
+  const modalVetbook = document.getElementById("modal-vetbook");
+
+  document.getElementById("btn-open-flux").addEventListener("click", () => modalFlux.classList.add("open"));
+  document.getElementById("btn-close-flux").addEventListener("click", () => modalFlux.classList.remove("open"));
+
+  const selectColorwayEl = document.getElementById("select-colorway");
+  if (selectColorwayEl) {
+    selectColorwayEl.addEventListener("change", () => {
+      applyColorway(duckCadContainer, selectColorwayEl.value);
+      const label = HARDWARE_COLORWAYS[selectColorwayEl.value]?.label || "Raw CAD (duck.bin)";
+      pushLog("CAD", `Hardware colorway -> ${label}`);
+    });
+  }
+
+  document.getElementById("btn-open-cheat").addEventListener("click", async () => {
+    modalCheat.classList.add("open");
+    const pre = document.getElementById("cheat-pre-content");
+    try {
+      let r = await fetch("assets/CHEATSHEET_MASTER_GUIDE.md");
+      if (!r.ok) r = await fetch("../docs/CHEATSHEET_MASTER_GUIDE.md");
+      pre.textContent = r.ok ? await r.text() : "Cheat sheet not generated yet.";
+    } catch {
+      pre.textContent = "Run tri_council_microduck.py to populate CHEATSHEET_MASTER_GUIDE.md";
+    }
+  });
+  document.getElementById("btn-close-cheat").addEventListener("click", () => modalCheat.classList.remove("open"));
+
+  document.getElementById("btn-open-vetbook").addEventListener("click", () => {
+    const v = state.vetbook;
+    document.getElementById("vetbook-body").innerHTML = `
+      <p><strong>Robot Name:</strong> ${v.name} (Alpha RK3566 · 15× XL330)</p>
+      <p><strong>Distance Walked:</strong> ${v.metersWalked.toFixed(2)} m</p>
+      <p><strong>Kicks:</strong> ${v.kicks} · <strong>Quacks:</strong> ${v.quacks} · <strong>Emotions:</strong> ${v.emotionsPlayed}</p>
+      <p><strong>Chorale Songs:</strong> ${v.songsSung} · <strong>Pickups:</strong> ${v.pickups} · <strong>Falls:</strong> ${v.falls}</p>
+      <p style="margin-top:10px; color:#10b981;">Mood: ${v.falls === 0 ? "Feeling great!" : "Vet check recommended (Impact Guard audit)"}</p>
+    `;
+    modalVetbook.classList.add("open");
+  });
+  document.getElementById("btn-close-vetbook").addEventListener("click", () => modalVetbook.classList.remove("open"));
+
+  // ---------------------------------------------------------------------------
+  // 9. Render Loop & Resize Handling
+  // ---------------------------------------------------------------------------
+  function resizeViewport() {
+    const wrap = canvas3d.parentElement;
+    const w = wrap.clientWidth || 800;
+    const h = wrap.clientHeight || 540;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resizeViewport);
+  resizeViewport();
+
+  let lastMs = performance.now();
+  let accum = 0;
+  let uiTick = 0;
+
+  function animate(nowMs) {
+    requestAnimationFrame(animate);
+    const frameDt = Math.min(0.05, (nowMs - lastMs) / 1000);
+    lastMs = nowMs;
+    accum += frameDt;
+
+    while (accum >= state.dt) {
+      stepSimulation(state.dt);
+      accum -= state.dt;
+      uiTick++;
+      if (uiTick % 2 === 0) updateDomTelemetry(); // 25 Hz DOM updates
+    }
+
+    if (state.followCam) {
+      controls.target.set(state.pose.x, 0.14 + state.pose.liftY * 0.5, state.pose.z);
+    }
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  pushLog("init", "MicroDuck 50 Hz Digital Twin initialized.");
+  requestAnimationFrame(animate);
+})();

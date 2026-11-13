@@ -1,0 +1,44 @@
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+Copyright 2026 MicroDuck Digital Twin Contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+-------------------------------------------------------------------------------
+THIRD-PARTY & UPSTREAM ATTRIBUTION NOTICE
+-------------------------------------------------------------------------------
+This repository contains an independent, clean-room browser & Python digital
+twin simulator (`src/`, `web/`, `tests/`, `scripts/`). It does NOT bundle or
+redistribute upstream source code, third-party STL/CAD files, or pre-trained
+ONNX/audio assets in the Git tree.
+
+When you run `bash scripts/fetch_upstream_assets.sh`, assets are fetched
+directly from the official upstream repositories on your local machine under
+their respective terms:
+
+1. Pollen Robotics — MicroDuck Software Stack (`pollen-robotics/microduck`)
+   - URL: https://github.com/pollen-robotics/microduck
+   - License: Apache License 2.0
+
+2. Pollen Robotics — MicroDuck Reinforcement Learning (`pollen-robotics/microduck_rl`)
+   - URL: https://github.com/pollen-robotics/microduck_rl
+   - Policies: https://huggingface.co/pollen-robotics/microduck-policies
+   - License: Apache License 2.0
+
+3. Luwu Intelligence Technology (XGO) — XGO-Duck Hardware (`LuwuDynamics/xgoduck_hardware`)
+   - URL: https://github.com/LuwuDynamics/xgoduck_hardware
+   - Terms: Personal and educational replication permitted; separate
+     authorization required from the hardware maintainer for commercial use
+     (see upstream `LICENSING.md`).

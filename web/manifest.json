@@ -1,0 +1,9 @@
+{
+  "name": "MicroDuck Sovereign 3D Digital Twin & Simulator",
+  "short_name": "MicroDuck Sim",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#0b0f17",
+  "theme_color": "#f5b700",
+  "description": "Interactive 3D WebGL Digital Twin, 61-D RL Observation Inspector, Impact Guard Lab, ToF Theremin, and 4-Part Chorale Studio for Pollen Robotics Microduck."
+}
