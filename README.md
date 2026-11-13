@@ -6,6 +6,9 @@
 
 An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Simulator** for the 15-DOF bipedal **MicroDuck / XGO-Duck** robot platform (14 policy-driven Dynamixel XL330-M288-T joints + 1 independent beak/mouth actuator).
 
+> **💡 Why I Built This (A Companion Sandbox, Not a Replacement):**  
+> I ordered a physical **MicroDuck** and wanted an interactive environment while waiting for it to arrive — a place to understand its 15-DOF kinematics, brainstorm new behaviors, prototype software features, and experiment with hardware/firmware upgrades (like VL53L5CX ToF Theremin synthesis, 4-duck BLE Chorale sync, and Impact Guard tuning). **This simulator is a companion ideation & testing sandbox and is in no way meant to replace the physical MicroDuck robot!**
+
 ![MicroDuck 50 Hz Digital Twin Dashboard](docs/screenshots/microduck_3col_dashboard.png)
 
 <p align="center">
