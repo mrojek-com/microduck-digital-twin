@@ -11,8 +11,6 @@ An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Sim
 
 ![MicroDuck 50 Hz Digital Twin Dashboard](docs/screenshots/microduck_3col_dashboard.png)
 
-![MicroDuck Compact Telemetry View](docs/screenshots/microduck_digital_twin_ui.png)
-
 > **Clean-Room Zero-Redistribution Architecture:**  
 > This repository contains **only original simulator code, kinematic/safety models, and deterministic unit tests**. It does **not** redistribute upstream source code, third-party STL/CAD files, or pre-trained ONNX/WAV binaries. Instead, a one-command bootstrap script ([`scripts/fetch_upstream_assets.sh`](scripts/fetch_upstream_assets.sh)) clones the official upstream repositories directly on your machine and builds the local runtime asset bundle.
 
@@ -25,16 +23,22 @@ An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Sim
    - Supports 5 authentic hardware shell colorways (*Cream White + Orange Beak*, *Sky Blue V5*, *Lavender Purple*, *Slate Tactical*, and *Raw CAD*).
    - Optional ankle-mounted roller-skate wheel assembly (`V5_AUDIO_VIDEO_TIRE_01.stl`) for `roller` locomotion mode.
 
-2. **50 Hz Control Loop (`dt = 0.02 s`) & 61-D Observation Inspector**
+2. **Live Motion Lab, Python/JS REPL & AI Motion Copilot**
+   - Live in-browser 50 Hz execution engine: paste Python or JavaScript kinematic routines directly into the simulator to test new behaviors in real time without flashing or breaking hardware.
+   - Clean, tactile `duck` API (`duck.setJoint`, `duck.setMouth`, `duck.setTwist`, `duck.setHead`, `duck.readTof`, `duck.playQuack`, `duck.applyImpulse`).
+   - 4 built-in motion presets (*Drunken Sailor Wobble*, *ToF Theremin Beatbox*, *Self-Righting Acrobat*, *Laser Dot Tracking*).
+   - Integrated AI Motion Copilot bar that queries local Ollama (`qwen3:30b-a3b`) to synthesize motion routines on the fly.
+
+3. **50 Hz Control Loop (`dt = 0.02 s`) & 61-D Observation Inspector**
    - Faithfully models the 61-dimensional policy observation vector (`gyro[3]`, `gravity[3]`, `joint_pos_err[14]`, `joint_vel[14]`, `prev_action[14]`, `cmd_twist[3]`, `cmd_head[4]`, `pad[2]`, `cmd_body[3]`, `pad[1]`) while excluding beak actuator index `9` (`mouth`) from closed-loop locomotion feedback.
    - Live browser **ONNX Runtime Web** policy inference (`velstand.onnx`, `pickup_detector.onnx`, `pet_detect.onnx`) with a deterministic phase-locked analytical CPG fallback when running offline.
 
-3. **Hardware Safety & Impact Guard Failure Laboratory**
+4. **Hardware Safety & Impact Guard Failure Laboratory**
    - **Impact Guard Stress-Test:** Compare factory **Level `5`** (where an $8.2\text{ rad/s}$ ground-contact spike trips a false-positive motor stall and collapses the stance leg) against hardened **Setting `R`** ($12.0\text{ rad/s}$ threshold survival).
    - **63-D Pickup Detector & `PAUSE_POSE` Ramp:** Simulates the $630\text{ D}$ ($10 \times 63$) sliding window pickup classifier and $300\text{ ms}$ smooth leg-tuck ramp.
    - **Safety Invariants:** $500\text{ ms}$ deadman command timeout, $[-\pi, +\pi]\text{ rad}$ target clamping, non-finite (`NaN`/`Inf`) frame rejection, and $200\text{ ms}$ fall-recovery debounce (`GAIN_NORMAL` $\to$ `GAIN_LIMP`).
 
-4. **Multi-Sensor & Behavior Emulation**
+5. **Multi-Sensor & Behavior Emulation**
    - **VL53L5CX $8\times 8$ ToF Depth Matrix & Theremin:** Interactive hand-distance slider and $8\times 8$ status/range grid with real-time WebAudio Theremin pitch + beak opening modulation.
    - **Autonomous Brains:** `autod` obstacle avoidance, HSV `laser-chase` pursuit, `soccer` ball approach & kick FSM, 13 keyframed emotions, and 4-duck synchronized BLE Chorale (`wistful.duckscore`).
 
