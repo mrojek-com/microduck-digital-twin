@@ -11,10 +11,7 @@ An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Sim
 
 ![MicroDuck 50 Hz Digital Twin Dashboard](docs/screenshots/microduck_3col_dashboard.png)
 
-<p align="center">
-  <img src="docs/screenshots/microduck_digital_twin_ui.png" alt="MicroDuck Compact Telemetry View" width="49%" />
-  <img src="web/assets/flux/flux_microduck_hero_studio.png" alt="MicroDuck Studio Concept Render" width="49%" />
-</p>
+![MicroDuck Compact Telemetry View](docs/screenshots/microduck_digital_twin_ui.png)
 
 > **Clean-Room Zero-Redistribution Architecture:**  
 > This repository contains **only original simulator code, kinematic/safety models, and deterministic unit tests**. It does **not** redistribute upstream source code, third-party STL/CAD files, or pre-trained ONNX/WAV binaries. Instead, a one-command bootstrap script ([`scripts/fetch_upstream_assets.sh`](scripts/fetch_upstream_assets.sh)) clones the official upstream repositories directly on your machine and builds the local runtime asset bundle.
