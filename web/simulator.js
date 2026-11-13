@@ -292,6 +292,8 @@
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b101b);
@@ -303,9 +305,12 @@
   const controls = new THREE.OrbitControls(camera, canvas3d);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.75;
+  controls.zoomSpeed = 0.85;
   controls.target.set(0, 0.14, 0);
-  controls.minDistance = 0.25;
-  controls.maxDistance = 4.5;
+  controls.minDistance = 0.20;
+  controls.maxDistance = 3.5;
+  controls.maxPolarAngle = Math.PI * 0.495; // Never dip below the floor
 
   // Lighting
   scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.65));

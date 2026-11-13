@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>MicroDuck Sovereign 3D Digital Twin &amp; Policy Lab</title>
+  <title>MicroDuck — Bipedal Digital Twin</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
   <script src="vendor/three.min.js"></script>
@@ -15,16 +15,18 @@
   <header class="topbar">
     <div class="brand">
       <h1>
-        MicroDuck Alpha Digital Twin
-        <span class="duck-badge">50 Hz · obs[1,61] → act[1,14] · 15× XL330</span>
+        MicroDuck
+        <span class="ver">v0.3</span>
       </h1>
-      <p>
-        Authentic CAD Rig (<code>duck.bin</code> + <code>robot_walk.xml</code>) · FLUX.1 + TripoSR 3D AI Mesh ·
-        13 Real Emotions · 4-Duck BLE Chorale · VL53L8CX ToF Theremin · Impact Guard Lab
-      </p>
+      <p class="tagline">Bipedal Digital Twin · 50 Hz WebGL &amp; Kinematics Studio</p>
+    </div>
+    <div class="header-badges" role="status" aria-live="off">
+      <span class="badge badge-live" id="b-hz"><i class="dot"></i><b>50</b> Hz</span>
+      <span class="badge" id="b-io">obs <b>61</b> → act <b>14</b></span>
+      <span class="badge" id="b-hw"><b>15</b>× XL330</span>
     </div>
     <div class="top-actions">
-      <span id="pill-health" class="pill pill-ok">HEALTH: HEALTHY (50.0 Hz)</span>
+      <span id="pill-health" class="pill pill-ok">HEALTHY</span>
       <span id="pill-mode" class="pill pill-warn">MODE: WALK</span>
       <button id="btn-open-flux" class="btn btn-primary" type="button">FLUX Gallery &amp; 3D STL</button>
       <button id="btn-open-cheat" class="btn btn-cyan" type="button">Cheat Sheet</button>
