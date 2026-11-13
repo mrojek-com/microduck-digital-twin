@@ -888,6 +888,137 @@
     },
   };
 
+  // ---------------------------------------------------------------------------
+  // 6.5. Physically-Grounded Robot Skills Kinematics (Claude Endgegner Engine)
+  // ---------------------------------------------------------------------------
+  function applySkillAnimation(name, p, action14, state) {
+    p = p < 0 ? 0 : (p > 1 ? 1 : p);
+    const a = action14;
+    for (let i = 0; i < 14; i++) a[i] = 0;
+
+    const pose = state.pose;
+    const cmd = state.cmd;
+    pose.liftY = 0;
+    pose.pitchFall = 0;
+    pose.rollFall = 0;
+
+    function clamp01(t) { return t < 0 ? 0 : (t > 1 ? 1 : t); }
+    function ss(e0, e1, x) {
+      const t = clamp01((x - e0) / (e1 - e0));
+      return t * t * (3 - 2 * t);
+    }
+    function eo(e0, e1, x) {
+      const t = 1 - clamp01((x - e0) / (e1 - e0));
+      return 1 - t * t * t;
+    }
+    function pulse(r0, r1, f0, f1, x) {
+      return ss(r0, r1, x) * (1 - ss(f0, f1, x));
+    }
+    function bothLegs(hip, knee, ankle) {
+      a[2] = hip;  a[3] = knee;  a[4] = ankle;
+      a[11] = hip; a[12] = knee; a[13] = ankle;
+    }
+
+    function kick(s) {
+      const sw = s > 0 ? 0 : 9;
+      const sp = s > 0 ? 9 : 0;
+
+      const lean = pulse(0.0, 0.25, 0.78, 1.0, p);
+      const wind = ss(0.25, 0.45, p);
+      const whip = eo(0.45, 0.56, p);
+      const back = ss(0.68, 1.0, p);
+
+      const hip = 0.45 * wind - 1.45 * whip + 1.0 * back;
+      const knee = 0.9 * wind - 0.8 * whip - 0.1 * back;
+      const toe = -0.3 * whip * (1 - ss(0.68, 0.9, p));
+
+      a[sw + 1] = s * 0.08 * lean;
+      a[sw + 2] = hip;
+      a[sw + 3] = knee;
+      a[sw + 4] = toe;
+
+      const cushion = lean * (0.6 + 0.4 * pulse(0.4, 0.5, 0.6, 0.8, p));
+      a[sp + 1] = s * 0.15 * lean;
+      a[sp + 2] = -0.07 * cushion;
+      a[sp + 3] = 0.15 * cushion;
+      a[sp + 4] = -0.07 * cushion;
+
+      pose.rollFall = s * 0.12 * lean;
+      pose.pitchFall = -0.06 * pulse(0.4, 0.52, 0.62, 0.8, p);
+      a[8] = -s * 0.08 * lean;
+      a[6] = 0.1 * pulse(0.4, 0.52, 0.62, 0.8, p);
+    }
+
+    switch (name) {
+      case "kick_left":
+        kick(1);
+        break;
+      case "kick_right":
+        kick(-1);
+        break;
+      case "flamingo": {
+        const shift = pulse(0.0, 0.2, 0.82, 0.97, p);
+        const lift = pulse(0.15, 0.38, 0.72, 0.92, p);
+        const sway = Math.sin(p * Math.PI * 6) * 0.012 * lift;
+
+        pose.rollFall = 0.1 * shift + sway;
+        a[10] = 0.15 * shift;
+        a[8] = -0.06 * shift - sway * 2;
+
+        a[2] = -0.7 * lift;
+        a[3] = 1.1 * lift;
+        a[4] = 0.2 * lift;
+        a[1] = -0.04 * lift;
+
+        const touch = Math.sin(Math.PI * clamp01((p - 0.82) / 0.16)) * (p > 0.82 ? 1 : 0);
+        const sup = 0.5 * shift;
+        a[11] = -0.05 * sup - 0.04 * touch;
+        a[12] = 0.1 * sup + 0.1 * touch;
+        a[13] = -0.05 * sup - 0.04 * touch;
+        a[6] = 0.05 * lift;
+        break;
+      }
+      case "polite_bow": {
+        const cush = pulse(0.0, 0.2, 0.8, 1.0, p);
+        const bow = pulse(0.15, 0.45, 0.62, 0.9, p);
+        bothLegs(-0.1 * cush, 0.2 * cush, -0.1 * cush);
+        a[5] = 0.7 * bow;
+        a[6] = 0.45 * bow;
+        pose.pitchFall = 0.04 * bow;
+        cmd.mouthOpen = 0.25 * pulse(0.4, 0.5, 0.6, 0.75, p);
+        break;
+      }
+      case "ground_pick": {
+        const squat = pulse(0.0, 0.3, 0.7, 1.0, p);
+        const neck = pulse(0.2, 0.45, 0.7, 0.92, p);
+        pose.liftY = -0.04 * squat;
+        bothLegs(-0.35 * squat, 0.7 * squat, -0.35 * squat);
+        pose.pitchFall = 0.06 * squat;
+        a[5] = 0.9 * neck;
+        a[6] = 0.5 * neck;
+        cmd.mouthOpen = ss(0.46, 0.5, p) * (1 - ss(0.5, 0.56, p));
+        break;
+      }
+      case "roulade": {
+        pose.liftY = 0.22 * Math.sin(Math.PI * p);
+        pose.pitchFall = p * 2 * Math.PI;
+
+        const crouch = ss(0.0, 0.15, p) * (1 - ss(0.15, 0.24, p));
+        const tuck = ss(0.2, 0.36, p) * (1 - ss(0.72, 0.85, p));
+        const reach = ss(0.72, 0.85, p) * (1 - ss(0.92, 1.0, p));
+
+        const hip = -0.5 * crouch - 1.4 * tuck - 0.25 * reach;
+        const knee = 1.0 * crouch + 2.0 * tuck + 0.08 * reach;
+        const ankle = -0.5 * crouch + 0.5 * tuck - 0.1 * reach;
+        bothLegs(hip, knee, ankle);
+
+        a[5] = 0.3 * crouch + 0.6 * tuck;
+        a[6] = 0.2 * crouch + 0.4 * tuck - 0.15 * reach;
+        break;
+      }
+    }
+  }
+
   function stepSimulation(dt) {
     state.time += dt;
     updateAutonomousBrain(dt);
@@ -1003,35 +1134,15 @@
         action14[13] = 0.65;
       }
 
-      // Active one-shot skill overlay
+      // Active one-shot skill overlay (Claude Endgegner Physics-Grounded Kinematics)
       if (state.activeSkill) {
         state.activeSkill.elapsed += dt;
         const p = Math.min(1, state.activeSkill.elapsed / state.activeSkill.duration);
-        const bell = Math.sin(p * Math.PI);
-        const nm = state.activeSkill.name;
-        if (nm === "ground_pick") {
-          action14[5] = 0.65 * bell;
-          action14[6] = 0.45 * bell;
-          action14[2] = -0.35 * bell;
-          action14[11] = 0.35 * bell;
-        } else if (nm === "kick_left") {
-          action14[2] = -0.75 * bell;
-          action14[3] = 0.55 * bell;
-        } else if (nm === "kick_right") {
-          action14[11] = 0.75 * bell;
-          action14[12] = -0.55 * bell;
-        } else if (nm === "polite_bow") {
-          action14[5] = 0.72 * bell;
-          action14[6] = 0.52 * bell;
-        } else if (nm === "flamingo") {
-          action14[1] = -0.25 * bell;
-          action14[2] = -0.6 * bell;
-          action14[3] = 0.95 * bell;
-        } else if (nm === "roulade") {
-          state.pose.pitchFall = p * Math.PI * 2;
-        }
+        applySkillAnimation(state.activeSkill.name, p, action14, state);
         if (p >= 1) {
           state.pose.pitchFall = 0;
+          state.pose.rollFall = 0;
+          state.pose.liftY = 0;
           state.activeSkill = null;
         }
       }
@@ -1300,9 +1411,9 @@
     }
     const durations = {
       ground_pick: 2.8,
-      kick_left: 0.5,
-      kick_right: 0.5,
-      roulade: 1.0,
+      kick_left: 1.2,
+      kick_right: 1.2,
+      roulade: 1.6,
       polite_bow: 3.0,
       flamingo: 3.5,
     };
