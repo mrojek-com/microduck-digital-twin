@@ -638,3 +638,162 @@ select {
   white-space: pre-wrap;
   color: #cbd5e1;
 }
+
+/* ==========================================================================
+   MicroDuck Subsystem Inspector HUD Bar & Tooltips (Claude Architecture)
+   ========================================================================== */
+#subsystem-inspector-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 10px 16px;
+  background: rgba(15, 23, 42, 0.90);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 12px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#subsystem-inspector-bar[data-tone="cyan"] {
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 4px 24px rgba(34, 211, 238, 0.15);
+}
+#subsystem-inspector-bar[data-tone="green"] {
+  border-color: rgba(74, 222, 128, 0.45);
+  box-shadow: 0 4px 24px rgba(74, 222, 128, 0.15);
+}
+#subsystem-inspector-bar[data-tone="amber"] {
+  border-color: rgba(251, 191, 36, 0.45);
+  box-shadow: 0 4px 24px rgba(251, 191, 36, 0.15);
+}
+#subsystem-inspector-bar[data-tone="red"] {
+  border-color: rgba(248, 113, 113, 0.45);
+  box-shadow: 0 4px 24px rgba(248, 113, 113, 0.15);
+}
+#subsystem-inspector-bar[data-tone="violet"] {
+  border-color: rgba(167, 139, 250, 0.45);
+  box-shadow: 0 4px 24px rgba(167, 139, 250, 0.15);
+}
+
+.si-badge-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.si-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.si-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--cyan);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.si-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.si-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.si-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.si-facts {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.si-facts div, .si-facts li {
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  list-style: none;
+  white-space: nowrap;
+}
+
+/* Glassmorphic floating tooltip */
+.md-tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 99999;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font: 12px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #eef3ff;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 20px rgba(56, 189, 248, 0.15);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.md-tooltip.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.md-tooltip .md-tooltip-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #38bdf8;
+  margin-bottom: 3px;
+}
+.md-tooltip .md-tooltip-text {
+  font-size: 11.5px;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+[data-info] {
+  cursor: help;
+}
+button[data-info], select[data-info], input[data-info] {
+  cursor: pointer;
+}

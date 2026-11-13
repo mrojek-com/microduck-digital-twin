@@ -1,12 +1,6 @@
 (() => {
   "use strict";
 
-  window.addEventListener("error", (e) => {
-    const el = document.getElementById("log-feed");
-    if (el) el.innerHTML += '<div style="color:#ef4444; font-weight:bold;">FATAL JS: ' + e.message + ' (' + e.filename + ':' + e.lineno + ')</div>';
-    console.error("FATAL JS ERROR:", e);
-  });
-
   // ---------------------------------------------------------------------------
   // 1. Ground-Truth Constants (matching duck-control/src/model.rs & obs.rs)
   // ---------------------------------------------------------------------------
@@ -98,7 +92,7 @@
     dt: 0.02, // 50 Hz control tick
     dpadMode: "move",
     locomotionMode: "walk", // walk | roller
-    rollerSkatesForced: false,
+    rollerSkatesForced: true, // Visible by default on feet
     brainMode: "manual", // manual | autod | laser | soccer
     activeMesh: "cad", // cad | flux_ai
     showTofRays: true,
@@ -306,76 +300,11 @@
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.10;
+  renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b101b);
-  scene.fog = new THREE.FogExp2(0x0b101b, 0.12);
-
-  // ───────────── Procedural Studio HDRI Environment (PBR IBL) ─────────────
-  function createStudioEnvironment(r, s) {
-    const W = 512, H = 256;
-    const c = document.createElement("canvas");
-    c.width = W;
-    c.height = H;
-    const g = c.getContext("2d");
-
-    // Base: dark studio vertical gradient
-    const base = g.createLinearGradient(0, 0, 0, H);
-    base.addColorStop(0.00, "#2a2e36");
-    base.addColorStop(0.45, "#14161b");
-    base.addColorStop(0.50, "#101216");
-    base.addColorStop(0.55, "#1a1b1e");
-    base.addColorStop(1.00, "#3a3834");
-    g.fillStyle = base;
-    g.fillRect(0, 0, W, H);
-
-    // Soft-edged studio softboxes (wraps seam)
-    const softbox = (cx, cy, rx, ry, inner, outer) => {
-      for (const ox of [-W, 0, W]) {
-        g.save();
-        g.translate(cx + ox, cy);
-        g.scale(rx, ry);
-        const rg = g.createRadialGradient(0, 0, 0, 0, 0, 1);
-        rg.addColorStop(0.00, inner);
-        rg.addColorStop(0.45, inner);
-        rg.addColorStop(1.00, outer);
-        g.fillStyle = rg;
-        g.beginPath();
-        g.arc(0, 0, 1, 0, Math.PI * 2);
-        g.fill();
-        g.restore();
-      }
-    };
-
-    g.globalCompositeOperation = "lighter";
-    softbox(W * 0.15, H * 0.30, 90, 48, "rgba(255,214,170,1.0)", "rgba(255,214,170,0)");  // Warm Key
-    softbox(W * 0.62, H * 0.34, 70, 36, "rgba(150,190,255,0.85)", "rgba(150,190,255,0)"); // Cool Rim
-    softbox(W * 0.88, H * 0.22, 60, 28, "rgba(210,220,255,0.45)", "rgba(210,220,255,0)"); // Fill
-    softbox(W * 0.40, H * 0.08, 120, 18, "rgba(255,255,255,0.55)", "rgba(255,255,255,0)"); // Overhead Strip
-
-    // Warm floor bounce glow below horizon
-    const fl = g.createLinearGradient(0, H * 0.5, 0, H);
-    fl.addColorStop(0, "rgba(90,84,76,0)");
-    fl.addColorStop(1, "rgba(120,112,100,0.55)");
-    g.fillStyle = fl;
-    g.fillRect(0, H * 0.5, W, H * 0.5);
-    g.globalCompositeOperation = "source-over";
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
-    tex.mapping = THREE.EquirectangularReflectionMapping;
-
-    const pmrem = new THREE.PMREMGenerator(r);
-    pmrem.compileEquirectangularShader();
-    const envMap = pmrem.fromEquirectangular(tex).texture;
-
-    s.environment = envMap;
-    tex.dispose();
-    pmrem.dispose();
-    return envMap;
-  }
-  createStudioEnvironment(renderer, scene);
+  scene.fog = new THREE.FogExp2(0x0b101b, 0.14);
 
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.02, 40);
   camera.position.set(0.55, 0.36, 0.58);
@@ -390,42 +319,30 @@
   controls.maxDistance = 3.5;
   controls.maxPolarAngle = Math.PI * 0.495; // Never dip below the floor
 
-  // ───────────── Studio Lighting ─────────────
-  const hemisphereLight = new THREE.HemisphereLight(0xdfe8ff, 0x2a2622, 0.30);
-  scene.add(hemisphereLight);
-
-  const keyLight = new THREE.DirectionalLight(0xfff0dc, 2.1);
-  keyLight.position.set(2.2, 3.8, 2.4);
+  // Lighting
+  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.65));
+  const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+  keyLight.position.set(1.8, 3.0, 2.2);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(2048, 2048);
-  keyLight.shadow.radius = 3.5;
-  keyLight.shadow.bias = -0.0003;
-  keyLight.shadow.normalBias = 0.015;
-  const sc = keyLight.shadow.camera;
-  sc.near = 0.5;
-  sc.far = 12;
-  sc.left = sc.bottom = -2.2;
-  sc.right = sc.top = 2.2;
-  sc.updateProjectionMatrix();
+  keyLight.shadow.camera.near = 0.1;
+  keyLight.shadow.camera.far = 10;
+  keyLight.shadow.camera.left = -2;
+  keyLight.shadow.camera.right = 2;
+  keyLight.shadow.camera.top = 2;
+  keyLight.shadow.camera.bottom = -2;
   scene.add(keyLight);
 
-  const fillLight = new THREE.DirectionalLight(0xb4ccff, 0.65);
-  fillLight.position.set(-2.8, 1.8, 2.0);
-  fillLight.castShadow = false;
-  scene.add(fillLight);
-
-  const rimLight = new THREE.DirectionalLight(0xa8c8ff, 1.55);
-  rimLight.position.set(-1.6, 2.8, -3.2);
-  rimLight.castShadow = false;
+  const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.65);
+  rimLight.position.set(-2.0, 1.4, -1.8);
   scene.add(rimLight);
 
   // Arena Floor + Grid
   const floorGeo = new THREE.PlaneGeometry(14, 14);
   const floorMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
-    roughness: 0.82,
-    metalness: 0.12,
-    envMapIntensity: 0.35,
+    roughness: 0.78,
+    metalness: 0.08,
   });
   const floorMesh = new THREE.Mesh(floorGeo, floorMat);
   floorMesh.rotation.x = -Math.PI / 2;
@@ -436,62 +353,19 @@
   gridHelper.position.y = 0.001;
   scene.add(gridHelper);
 
-  // ───────────── Soft Radial Contact Shadow ─────────────
-  function createContactShadow() {
-    const S = 128;
-    const c = document.createElement("canvas");
-    c.width = c.height = S;
-    const g = c.getContext("2d");
-    const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    rg.addColorStop(0.00, "rgba(0,0,0,0.72)");
-    rg.addColorStop(0.35, "rgba(0,0,0,0.45)");
-    rg.addColorStop(0.70, "rgba(0,0,0,0.12)");
-    rg.addColorStop(1.00, "rgba(0,0,0,0)");
-    g.fillStyle = rg;
-    g.fillRect(0, 0, S, S);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
-
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.52, 0.52),
-      new THREE.MeshBasicMaterial({
-        map: tex,
-        transparent: true,
-        depthWrite: false,
-        toneMapped: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      })
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.002;
-    mesh.renderOrder = 1;
-    return mesh;
-  }
-
-  function updateContactShadow(mesh, pose) {
-    const a = Math.max(0, pose.liftY || 0);
-    const k = Math.exp(-a / 0.12);
-    mesh.position.set(pose.x, 0.002, pose.z);
-    mesh.scale.setScalar(1 + a * 2.8);
-    mesh.material.opacity = Math.max(0.0, Math.min(1.0, k * 0.72));
-    mesh.visible = mesh.material.opacity > 0.01;
-  }
-
-  const shadowMesh = createContactShadow();
-  scene.add(shadowMesh);
+  // Contact shadow disc under robot
+  const shadowDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(0.11, 32),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 })
+  );
+  shadowDisc.rotation.x = -Math.PI / 2;
+  shadowDisc.position.y = 0.002;
+  scene.add(shadowDisc);
 
   // Purple Soccer Ball
   const ballMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.042, 32, 32),
-    new THREE.MeshStandardMaterial({
-      color: 0x9333ea,
-      roughness: 0.30,
-      metalness: 0.10,
-      envMapIntensity: 1.15,
-    })
+    new THREE.SphereGeometry(0.042, 24, 24),
+    new THREE.MeshStandardMaterial({ color: 0x9333ea, roughness: 0.35, metalness: 0.1 })
   );
   ballMesh.castShadow = true;
   ballMesh.position.set(state.ball.x, 0.042, state.ball.z);
@@ -555,10 +429,9 @@
     g.computeVertexNormals();
 
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      roughness: 0.22,
+      color: 0x00d8f6, // Vibrant cyan polyurethane skate tire
+      roughness: 0.35,
       metalness: 0.15,
-      envMapIntensity: 1.30,
       flatShading: true,
     });
     const radius = tireAssetData.radius_m || 0.015;
@@ -566,10 +439,13 @@
     applyJointsToCadGroups(cadBodyGroups, DEFAULT_POSITION);
     duckWorldRoot.updateMatrixWorld(true);
 
+    // Target world orientation: wheel axle along world Z axis (rolls forward along X)
+    const targetWorldQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+
     // Mount 2 wheels on outer edge of left foot (body 5) and right foot (body 14)
     [
-      { bodyIdx: 5, sideSign: 1 },
-      { bodyIdx: 14, sideSign: -1 },
+      { bodyIdx: 5, sideSign: -1 }, // Left foot (Z < 0)
+      { bodyIdx: 14, sideSign: 1 },  // Right foot (Z > 0)
     ].forEach(({ bodyIdx, sideSign }) => {
       const ankleGrp = cadBodyGroups[bodyIdx];
       const box = new THREE.Box3().setFromObject(ankleGrp);
@@ -577,25 +453,34 @@
       const size = new THREE.Vector3();
       box.getCenter(center);
       box.getSize(size);
-      [-0.32, 0.32].forEach((xFrac) => {
+
+      const ankleWorldQuat = new THREE.Quaternion();
+      ankleGrp.getWorldQuaternion(ankleWorldQuat);
+      const localWheelQuat = ankleWorldQuat.clone().invert().multiply(targetWorldQuat);
+
+      [-0.018, 0.018].forEach((xOff) => {
         const w = new THREE.Mesh(g, mat);
         w.castShadow = true;
         w.receiveShadow = true;
         const worldPos = new THREE.Vector3(
-          center.x + xFrac * Math.max(0.05, size.x),
-          radius + 0.001,
-          center.z + sideSign * (size.z * 0.55 + 0.008)
+          center.x + xOff,
+          radius,
+          center.z + sideSign * (size.z * 0.5 + 0.008)
         );
         ankleGrp.worldToLocal(worldPos);
         w.position.copy(worldPos);
-        // Align wheel rotation axis perpendicular to forward X axis (along local axle)
-        w.rotation.y = Math.PI / 2;
+        w.quaternion.copy(localWheelQuat);
         w.userData.radius = radius;
         w.visible = state.locomotionMode === "roller" || state.rollerSkatesForced;
         ankleGrp.add(w);
         rollerWheels.push(w);
       });
     });
+
+    const btnToggleRollerSkates = document.getElementById("btn-toggle-roller-skates");
+    if (btnToggleRollerSkates && state.rollerSkatesForced) {
+      btnToggleRollerSkates.classList.add("active");
+    }
     pushLog("STL", `Mounted 4 real CAD wheels from V5_AUDIO_VIDEO_TIRE_01.stl (${tireAssetData.faces.length} tris, r=${(radius * 1000).toFixed(1)}mm).`);
   }
 
@@ -631,20 +516,12 @@
     });
 
     rig.parts.forEach((p) => {
-      const role = classifyCadPartRole(p.rgb, p.body) || "internal";
-      const PBR = {
-        shell:    { roughness: 0.32, metalness: 0.05, envMapIntensity: 1.25 },
-        trim:     { roughness: 0.44, metalness: 0.02, envMapIntensity: 0.90 },
-        eyeRing:  { roughness: 0.30, metalness: 0.10, envMapIntensity: 1.10 },
-        sole:     { roughness: 0.65, metalness: 0.02, envMapIntensity: 0.50 },
-        internal: { roughness: 0.26, metalness: 0.76, envMapIntensity: 1.45 },
-      };
-      const cfg = PBR[role] || PBR.internal;
+      const role = classifyCadPartRole(p.rgb, p.body);
+      const isPlastic = role !== null;
       const mat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(p.rgb[0] / 255, p.rgb[1] / 255, p.rgb[2] / 255),
-        roughness: cfg.roughness,
-        metalness: cfg.metalness,
-        envMapIntensity: cfg.envMapIntensity,
+        roughness: isPlastic ? 0.65 : 0.48,
+        metalness: isPlastic ? 0.05 : 0.18,
         flatShading: true,
         side: THREE.DoubleSide,
       });
@@ -1223,13 +1100,57 @@
       // Walking / Roller locomotion cycle
       if (!state.isSeated && speed > 0.01) {
         if (state.locomotionMode === "roller") {
-          // Crouch and glide smoothly
-          action14[2] = -0.22;
-          action14[3] = 0.45;
-          action14[4] = -0.22;
-          action14[11] = 0.22;
-          action14[12] = -0.45;
-          action14[13] = 0.22;
+          // Dynamic Roller Skating Leg Stride (matching authentic XGO-Duck roller policy)
+          // The duck performs rhythmic alternating skating thrusts, pushing laterally & backward
+          // while leaning gracefully into each gliding stride on its 4 polyurethane wheels.
+          const skateFreq = 5.2; // Natural dynamic skating cadence
+          const phase = state.time * skateFreq;
+          const s = Math.sin(phase);
+          const strideAmp = Math.min(1.0, speed * 2.8);
+
+          // Athletic low aerodynamic crouch
+          const crouch = 0.20;
+          action14[2] = -crouch;
+          action14[3] = crouch * 1.8;
+          action14[4] = -crouch * 0.8;
+          action14[11] = crouch;
+          action14[12] = -crouch * 1.8;
+          action14[13] = crouch * 0.8;
+
+          // Alternating left/right leg skating push:
+          if (s > 0) {
+            // Left leg pushes outward & back (thrust phase)
+            const thrust = s * strideAmp;
+            action14[1] = -0.22 * thrust;        // Left hip roll outward
+            action14[2] += -0.16 * thrust;       // Left hip pitch extension
+            action14[3] += -0.22 * thrust;       // Left knee push
+            action14[4] += 0.12 * thrust;        // Left ankle flexion
+            // Right leg carries weight & glides smoothly
+            action14[10] = 0.06 * thrust;
+            action14[12] += -0.10 * thrust;      // Right knee compliant flex
+            // Body rolls into the gliding right side
+            state.pose.rollFall = -0.07 * thrust;
+            action14[0] = -0.08 * thrust;        // Counter yaw
+            action14[9] = 0.08 * thrust;
+          } else {
+            // Right leg pushes outward & back (thrust phase)
+            const thrust = -s * strideAmp;
+            action14[10] = 0.22 * thrust;       // Right hip roll outward
+            action14[11] += 0.16 * thrust;      // Right hip pitch extension
+            action14[12] += 0.22 * thrust;      // Right knee push
+            action14[13] += -0.12 * thrust;     // Right ankle flexion
+            // Left leg carries weight & glides smoothly
+            action14[1] = -0.06 * thrust;
+            action14[3] += 0.10 * thrust;       // Left knee compliant flex
+            // Body rolls into the gliding left side
+            state.pose.rollFall = 0.07 * thrust;
+            action14[0] = 0.08 * thrust;        // Counter yaw
+            action14[9] = -0.08 * thrust;
+          }
+
+          // Aerodynamic neck & head tilt during skate glide
+          action14[5] += 0.14 * strideAmp;      // Neck reaches forward
+          action14[8] += -state.pose.rollFall * 0.75; // Head stabilizes horizontal gaze
         } else {
           const phase = state.time * 8.0;
           const swing = Math.min(0.32, speed * 0.72);
@@ -1380,7 +1301,8 @@
     // Update Three.js transforms
     duckWorldRoot.position.set(state.pose.x, state.pose.liftY, state.pose.z);
     duckWorldRoot.rotation.set(state.pose.rollFall, state.pose.yaw, -state.pose.pitchFall);
-    updateContactShadow(shadowMesh, state.pose);
+    shadowDisc.position.set(state.pose.x, 0.002, state.pose.z);
+    shadowDisc.material.opacity = Math.max(0.12, 0.45 - state.pose.liftY * 1.5);
 
     if (state.activeMesh === "cad") {
       applyJointsToCadGroups(cadBodyGroups, state.joints);
@@ -1388,8 +1310,11 @@
       for (let i = 0; i < rollerWheels.length; i++) {
         const w = rollerWheels[i];
         w.visible = showRoller;
-        if (showRoller && Math.abs(state.cmd.vx) > 0.005) {
-          w.rotation.z -= (state.cmd.vx * dt) / Math.max(0.012, w.userData.radius || 0.015);
+        if (showRoller) {
+          const moveSpeed = Math.abs(state.cmd.vx) > 0.005 ? state.cmd.vx : (speed > 0.01 ? speed : 0);
+          if (Math.abs(moveSpeed) > 0.005) {
+            w.rotateX(-(moveSpeed * dt) / Math.max(0.012, w.userData.radius || 0.015));
+          }
         }
       }
     } else {
@@ -1527,14 +1452,44 @@
   // ---------------------------------------------------------------------------
   // 8. Skills & Event Bindings
   // ---------------------------------------------------------------------------
+  function updateLocomotionUi() {
+    document.querySelectorAll("[data-skill]").forEach((b) => {
+      const s = b.dataset.skill;
+      if (s === "walk" || s === "roller") {
+        const isActive = (s === state.locomotionMode);
+        b.classList.toggle("btn-primary", isActive);
+        b.classList.toggle("active-mode", isActive);
+      }
+    });
+    if (skillStatusTag) {
+      skillStatusTag.textContent = state.locomotionMode === "walk" ? "velstand.onnx" : "roller.onnx";
+    }
+    const btnToggleRollerSkates = document.getElementById("btn-toggle-roller-skates");
+    if (btnToggleRollerSkates) {
+      btnToggleRollerSkates.classList.toggle("active", state.locomotionMode === "roller" || state.rollerSkatesForced);
+    }
+  }
+
   function triggerSkill(name) {
     if (name === "walk" || name === "roller") {
       state.locomotionMode = name;
       state.isSeated = false;
       state.isResting = false;
-      skillStatusTag.textContent = name === "walk" ? "velstand.onnx" : "roller.onnx";
-      playProceduralQuack(name === "walk" ? 1.0 : 1.18);
-      pushLog("robotd", `Switched mode to ${name}.`);
+      
+      if (name === "roller") {
+        state.rollerSkatesForced = true;
+        // If speed is 0, auto-engage forward speed so the user immediately sees the roller skating strides!
+        if (Math.abs(state.cmd.vx) < 0.05) {
+          state.cmd.vx = 0.28;
+          if (sliderVx) sliderVx.value = 0.28;
+          if (valVx) valVx.textContent = "0.28 m/s";
+        }
+        pushLog("robotd", "Switched mode to Roller Skates (roller.onnx) - Dynamic leg push strides engaged.");
+      } else {
+        pushLog("robotd", "Switched mode to Bipedal Walk (velstand.onnx) - Bipedal walking cycle engaged.");
+      }
+      updateLocomotionUi();
+      playProceduralQuack(name === "walk" ? 1.0 : 1.25);
       return;
     }
     if (name === "sit_toggle") {
@@ -2098,6 +2053,358 @@ function onStep(t, dt, duck) {
     controls.update();
     renderer.render(scene, camera);
   }
+
+
+  // ===========================================================================
+  // 10. Subsystem Inspector & Interactive Tooltips (Claude Architecture)
+  // ===========================================================================
+  const SUBSYSTEM_INFO = {
+    "subsys-walk": {
+      badge: "RL LOCOMOTION",
+      tone: "cyan",
+      title: "Bipedal Locomotion Policy (velstand.onnx)",
+      text: "50 Hz neural network policy trained with PPO for stable dynamic limit-cycle walking, capturing phase transitions, contact timing, and continuous twist commands.",
+      facts: ["50 Hz Loop", "PPO Policy", "Limit-Cycle Stride", "SE(3) Twist"]
+    },
+    "subsys-roller": {
+      badge: "SKATE MODE",
+      tone: "cyan",
+      title: "Roller Skates Locomotion (roller.onnx)",
+      text: "Passive wheel locomotion mode utilizing the 4 cyan polyurethane roller skate wheels mounted on both feet. Enables aerodynamic low crouch, lateral push-off carving, and fast gliding.",
+      facts: ["V5 STL Tires", "4x PU Wheels", "Speed Skater Crouch", "Carving Glide"]
+    },
+    "subsys-sit": {
+      badge: "POSTURE",
+      tone: "green",
+      title: "Sit / Stand Mode Transition",
+      text: "Smooth compliant joint trajectory transitioning the robot between upright standing and grounded seated rest, preventing actuator current spikes.",
+      facts: ["Smooth Transition", "Compliant Rest", "Actuator Unload"]
+    },
+    "subsys-pick": {
+      badge: "MANIPULATION",
+      tone: "green",
+      title: "Ground Picking Routine",
+      text: "Whole-body coordination lowering the center of mass to touch or grasp ground objects with beak mouth aperture control.",
+      facts: ["Squat Depth", "Neck Extension", "Beak Trigger"]
+    },
+    "subsys-kick": {
+      badge: "BALL DYNAMICS",
+      tone: "amber",
+      title: "Dynamic Single-Leg Kick",
+      text: "High-velocity leg extension with single-support balance compensation on the stance foot, transferring dynamic momentum to the ball.",
+      facts: ["Single Support", "Momentum Transfer", "Stance Stabilization"]
+    },
+    "subsys-choreo": {
+      badge: "EXPRESSIVE",
+      tone: "violet",
+      title: "Choreography & Expressive Routines",
+      text: "Polite bow, roulade 360° flip, flamingo single-leg balance, quacking and wing-flapping blended with whole-body balance control.",
+      facts: ["Flamingo Balance", "Roulade Flip", "Polite Bow", "Personality"]
+    },
+    "subsys-emotion": {
+      badge: "EXPRESSIVE",
+      tone: "violet",
+      title: "Real Emotion Playback (.wav + keyframes)",
+      text: "Synchronized multi-track expressive playback: 12-track audio quacks, beak lip-sync, head gestures, and face board LED mood patterns.",
+      facts: ["Lip-Sync Audio", "13 Emotion Clips", "LED Synchronization"]
+    },
+    "subsys-guard": {
+      badge: "PROTECTION",
+      tone: "amber",
+      title: "Impact Guard & Velocity Limiter",
+      text: "Continuous IMU shock, torque threshold, and collision monitoring. Dynamically limits joint velocities and current to protect gearboxes from impact damage.",
+      facts: ["Hardened Profile R", "IMU Shock Detection", "Current Clamping"]
+    },
+    "subsys-impulse": {
+      badge: "SAFETY TESTBED",
+      tone: "red",
+      title: "Push Impulse Disturbance Injection",
+      text: "Injects sudden 7.5 rad/s angular impulse to evaluate recovery margins, capture steps, and Impact Guard compliance during external disturbance.",
+      facts: ["7.5 rad/s Disturbance", "Capture Step Test", "Sim-to-Real Margin"]
+    },
+    "subsys-pickup": {
+      badge: "SAFETY",
+      tone: "amber",
+      title: "Human Pick-up Detection",
+      text: "Simulates a human lifting the robot off the floor: zero foot contact detection immediately ramps legs into compliant dangling mode.",
+      facts: ["Dangling Detection", "Contact Loss", "Compliant Damping"]
+    },
+    "subsys-reset": {
+      badge: "CALIBRATION",
+      tone: "green",
+      title: "Home Pose & Sensor Calibration",
+      text: "Interpolates all 15 joints smoothly back to the mechanical zero-reference home pose and re-zeros odometry and velocity commands.",
+      facts: ["Zero Offsets", "Smooth Interpolation", "Odometry Reset"]
+    },
+    "subsys-stop": {
+      badge: "SAFETY",
+      tone: "red",
+      title: "Immediate E-Stop with Compliance",
+      text: "Instantly zeroes policy commands and applies active damping to all 15 actuators, safely stopping motion without mechanical shock.",
+      facts: ["Zero Command", "Active Damping", "Zero Gear Shock"]
+    },
+    "subsys-viewport": {
+      badge: "3D DIGITAL TWIN",
+      tone: "cyan",
+      title: "Three.js 50 Hz Hardware Simulator",
+      text: "Articulated CAD hierarchy rendered with authentic Lambertian materials, contact shadows, real-time kinematics, and interactive camera orbits.",
+      facts: ["50 Hz Frame Rate", "Real CAD Meshes", "Contact Shadows"]
+    },
+    "subsys-tof": {
+      badge: "PERCEPTION",
+      tone: "cyan",
+      title: "VL53L5CX 8×8 Time-of-Flight Depth Array",
+      text: "Multizone 64-channel depth matrix measuring distance from 8 cm to 400 cm across a 63° diagonal FoV for spatial obstacle mapping and theremin audio.",
+      facts: ["8×8 Zones", "63° FoV", "64 Range Channels", "Theremin Pitch"]
+    },
+    "subsys-obs61": {
+      badge: "RL STATE",
+      tone: "cyan",
+      title: "61-D Policy Observation Vector",
+      text: "Full state observation vector fed into the ONNX policy every 20 ms: joint positions & velocities (30), IMU orientation & rates (6), velocity commands (3), previous actions (14), gait phase (8).",
+      facts: ["61 Dimensions", "50 Hz Update", "Proprioceptive State"]
+    },
+    "subsys-joints": {
+      badge: "ACTUATION",
+      tone: "green",
+      title: "15-DOF Bus Servo Telemetry",
+      text: "Live position, angular velocity, and load monitoring for all 15 serial bus servos across head (3), neck (1), mouth (1), and legs (10).",
+      facts: ["15 Servos", "12-bit Encoder", "RS-485 Serial Bus"]
+    },
+    "subsys-kinematics": {
+      badge: "KINEMATICS",
+      tone: "cyan",
+      title: "SE(3) Forward Kinematics & Base State",
+      text: "Computes exact Cartesian positions, rotations, and Jacobians for the torso base frame and both foot contact centers via Lie group SE(3) transforms.",
+      facts: ["SE(3) Lie Group", "Forward Kinematics", "Cartesian Base Pose"]
+    },
+    "subsys-telemetry": {
+      badge: "SYSTEM HEALTH",
+      tone: "amber",
+      title: "Loop Frequency & Real-Time Jitter",
+      text: "Monitors simulation loop rate (nominal 50 Hz), render FPS, and communication latency to ensure deterministic control timing.",
+      facts: ["50 Hz Control Loop", "Zero Jitter Target", "WebSocket Link"]
+    },
+    "subsys-colorway": {
+      badge: "VISUAL",
+      tone: "violet",
+      title: "Hardware Shell Colorway",
+      text: "Custom 3D print shell presets: Classic White & Orange, Sky Blue & Orange, Lavender & Cyan, Stealth Slate & Purple, or Raw CAD duck.bin.",
+      facts: ["5 Presets", "Real Shell Materials", "Accurate Beak/Feet Colors"]
+    },
+    "subsys-autod": {
+      badge: "AUTONOMOUS",
+      tone: "cyan",
+      title: "autod Autonomous Behavior Daemon",
+      text: "State machine cycling between random wandering, curiosity head tracking, grooming, and vocalizations without manual pilot intervention.",
+      facts: ["State Machine", "Curiosity Tracking", "Autonomous Roam"]
+    },
+    "subsys-laser": {
+      badge: "VISION TRACKING",
+      tone: "red",
+      title: "Laser Pointer Pursuit",
+      text: "Tracks the interactive floor laser dot using visual servoing: computes heading error and drives locomotion towards the target.",
+      facts: ["Target Acquisition", "Heading Tracking", "Interactive Target"]
+    },
+    "subsys-soccer": {
+      badge: "GAME AI",
+      tone: "emerald",
+      title: "Autonomous Soccer Striker",
+      text: "Perception and path planning loop: locates the ball, aligns approach heading, dribbles, and executes a dynamic kick into the goal area.",
+      facts: ["Ball Seeking", "Approach Alignment", "Auto-Kick Trigger"]
+    }
+  };
+
+  function setupSubsystemInspector() {
+    const doc = document;
+    const MARGIN = 8;
+    const OFFSET = 14;
+    const IDLE_DELAY = 400;
+
+    let tooltip = doc.querySelector(".md-tooltip");
+    if (!tooltip) {
+      tooltip = doc.createElement("div");
+      tooltip.className = "md-tooltip";
+      tooltip.setAttribute("role", "tooltip");
+      doc.body.appendChild(tooltip);
+    }
+
+    const TAG_MAP = [
+      ['[data-skill="walk"]', "subsys-walk"],
+      ['[data-skill="roller"]', "subsys-roller"],
+      ['[data-skill="sit_toggle"]', "subsys-sit"],
+      ['[data-skill="ground_pick"]', "subsys-pick"],
+      ['[data-skill="kick_left"], [data-skill="kick_right"]', "subsys-kick"],
+      ['[data-skill="roulade"], [data-skill="polite_bow"], [data-skill="flamingo"]', "subsys-choreo"],
+      ["#select-emotion, #btn-play-emotion", "subsys-emotion"],
+      ["#select-guard", "subsys-guard"],
+      ["#btn-push-test", "subsys-impulse"],
+      ["#btn-pickup-toggle", "subsys-pickup"],
+      ["#btn-relax", "subsys-sit"],
+      ["#btn-reset-pos", "subsys-reset"],
+      ["#btn-stop-vel", "subsys-stop"],
+      ["#btn-toggle-mesh, .viewport-wrap", "subsys-viewport"],
+      ["#select-colorway", "subsys-colorway"],
+      ["#btn-toggle-roller-skates", "subsys-roller"],
+      ["#btn-toggle-tof-rays", "subsys-tof"],
+      ["#btn-mode-autod", "subsys-autod"],
+      ["#btn-mode-laser", "subsys-laser"],
+      ["#btn-mode-soccer", "subsys-soccer"],
+      ["#tof-grid, #slider-theremin, #btn-theremin", "subsys-tof"],
+      ["#obs-canvas", "subsys-obs61"],
+      ["#joints-tbody, .joints-table", "subsys-joints"],
+      ["#btn-chorale, #btn-chorale-stop", "subsys-choreo"],
+      [".telemetry-card, .header-badges", "subsys-telemetry"]
+    ];
+
+    TAG_MAP.forEach(([sel, key]) => {
+      try {
+        doc.querySelectorAll(sel).forEach((el) => {
+          if (!el.hasAttribute("data-info")) el.setAttribute("data-info", key);
+        });
+      } catch (e) {}
+    });
+
+    function getBar() { return doc.getElementById("subsystem-inspector-bar"); }
+    function setElText(id, val) {
+      const el = doc.getElementById(id);
+      if (el && val != null) el.textContent = String(val);
+    }
+
+    function renderFacts(facts) {
+      const list = doc.getElementById("si-facts");
+      if (!list) return;
+      while (list.firstChild) list.removeChild(list.firstChild);
+      if (!facts) return;
+      (Array.isArray(facts) ? facts : [facts]).forEach((fact) => {
+        const d = doc.createElement("div");
+        d.textContent = String(fact);
+        list.appendChild(d);
+      });
+    }
+
+    const IDLE = {
+      tone: "cyan",
+      badge: "INSPECTOR",
+      title: "Subsystem Inspector Active",
+      text: "Hover over any control, sensor, joint or skill to inspect live subsystem kinematics and telemetry.",
+      facts: ["50 Hz Loop", "15-DOF", "SE(3) Kinematics"]
+    };
+
+    function setBarIdle() {
+      const b = getBar();
+      if (b) b.setAttribute("data-tone", IDLE.tone);
+      setElText("si-badge", IDLE.badge);
+      setElText("si-title", IDLE.title);
+      setElText("si-text", IDLE.text);
+      renderFacts(IDLE.facts);
+    }
+
+    function setBarInfo(info) {
+      const b = getBar();
+      if (b) b.setAttribute("data-tone", info.tone || "cyan");
+      setElText("si-badge", info.badge || "INFO");
+      setElText("si-title", info.title || "Subsystem");
+      setElText("si-text", info.text || "");
+      renderFacts(info.facts);
+    }
+
+    function fillTooltip(info) {
+      while (tooltip.firstChild) tooltip.removeChild(tooltip.firstChild);
+      if (info.title) {
+        const t = doc.createElement("div");
+        t.className = "md-tooltip-title";
+        t.textContent = info.title;
+        tooltip.appendChild(t);
+      }
+      if (info.text) {
+        const d = doc.createElement("div");
+        d.className = "md-tooltip-text";
+        d.textContent = info.text;
+        tooltip.appendChild(d);
+      }
+    }
+
+    function positionTooltip(x, y, rect) {
+      const vw = window.innerWidth || doc.documentElement.clientWidth;
+      const vh = window.innerHeight || doc.documentElement.clientHeight;
+      const tw = tooltip.offsetWidth || 260;
+      const th = tooltip.offsetHeight || 80;
+      let left, top;
+
+      if (typeof x === "number" && typeof y === "number" && (x || y)) {
+        left = x + OFFSET;
+        top = y + OFFSET;
+        if (left + tw + MARGIN > vw) left = x - OFFSET - tw;
+        if (top + th + MARGIN > vh) top = y - OFFSET - th;
+      } else if (rect) {
+        left = rect.left + rect.width / 2 - tw / 2;
+        top = rect.bottom + OFFSET;
+        if (top + th + MARGIN > vh) top = rect.top - OFFSET - th;
+      } else {
+        left = MARGIN; top = MARGIN;
+      }
+      left = Math.max(MARGIN, Math.min(left, vw - tw - MARGIN));
+      top = Math.max(MARGIN, Math.min(top, vh - th - MARGIN));
+      tooltip.style.left = Math.round(left) + "px";
+      tooltip.style.top = Math.round(top) + "px";
+    }
+
+    let idleTimer = null;
+    let activeEl = null;
+
+    function findInspectable(t) {
+      return t && t.closest ? t.closest("[data-info], [data-tooltip]") : null;
+    }
+
+    doc.addEventListener("pointerover", (e) => {
+      const el = findInspectable(e.target);
+      if (!el) return;
+      const key = el.getAttribute("data-info") || el.getAttribute("data-tooltip");
+      const info = SUBSYSTEM_INFO[key];
+      if (!info) return;
+
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+      activeEl = el;
+      setBarInfo(info);
+      fillTooltip(info);
+      tooltip.classList.add("is-visible");
+      positionTooltip(e.clientX, e.clientY, el.getBoundingClientRect());
+    });
+
+    doc.addEventListener("pointermove", (e) => {
+      if (!activeEl || !tooltip.classList.contains("is-visible")) return;
+      positionTooltip(e.clientX, e.clientY, activeEl.getBoundingClientRect());
+    });
+
+    doc.addEventListener("pointerout", (e) => {
+      const el = findInspectable(e.target);
+      if (!el) return;
+      const next = e.relatedTarget;
+      if (next && el.contains(next)) return;
+
+      tooltip.classList.remove("is-visible");
+      if (activeEl === el) activeEl = null;
+
+      const nextEl = findInspectable(next);
+      if (nextEl && SUBSYSTEM_INFO[nextEl.getAttribute("data-info")]) return;
+
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        idleTimer = null;
+        if (!activeEl) setBarIdle();
+      }, IDLE_DELAY);
+    });
+
+    doc.documentElement.addEventListener("mouseleave", () => {
+      tooltip.classList.remove("is-visible");
+      activeEl = null;
+      setBarIdle();
+    });
+  }
+
+  setupSubsystemInspector();
+  updateLocomotionUi();
 
   pushLog("init", "MicroDuck 50 Hz Digital Twin initialized.");
   requestAnimationFrame(animate);

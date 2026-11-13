@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>MicroDuck — Bipedal Digital Twin</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=0.3.6">
   <script src="vendor/three.min.js"></script>
   <script src="vendor/GLTFLoader.js"></script>
   <script src="vendor/OrbitControls.js"></script>
@@ -86,15 +86,15 @@
           <span id="skill-status-tag" class="mono-tag">velstand.onnx</span>
         </div>
         <div class="btn-grid-3" style="margin-bottom:8px;">
-          <button class="btn btn-primary" data-skill="walk" type="button">Walk</button>
-          <button class="btn" data-skill="roller" type="button">Roller</button>
-          <button class="btn" data-skill="sit_toggle" type="button">A: Sit/Stand</button>
-          <button class="btn" data-skill="ground_pick" type="button">B: Pick</button>
-          <button class="btn" data-skill="kick_left" type="button">Kick Left</button>
-          <button class="btn" data-skill="kick_right" type="button">Kick Right</button>
-          <button class="btn" data-skill="roulade" type="button">Roulade</button>
-          <button class="btn" data-skill="polite_bow" type="button">Polite Bow</button>
-          <button class="btn" data-skill="flamingo" type="button">Flamingo</button>
+          <button class="btn btn-primary" data-skill="walk" data-info="subsys-walk" type="button">Walk</button>
+          <button class="btn" data-skill="roller" data-info="subsys-roller" type="button">Roller</button>
+          <button class="btn" data-skill="sit_toggle" data-info="subsys-sit" type="button">A: Sit/Stand</button>
+          <button class="btn" data-skill="ground_pick" data-info="subsys-pick" type="button">B: Pick</button>
+          <button class="btn" data-skill="kick_left" data-info="subsys-kick" type="button">Kick Left</button>
+          <button class="btn" data-skill="kick_right" data-info="subsys-kick" type="button">Kick Right</button>
+          <button class="btn" data-skill="roulade" data-info="subsys-choreo" type="button">Roulade</button>
+          <button class="btn" data-skill="polite_bow" data-info="subsys-choreo" type="button">Polite Bow</button>
+          <button class="btn" data-skill="flamingo" data-info="subsys-choreo" type="button">Flamingo</button>
         </div>
 
         <div class="control-row">
@@ -127,17 +127,17 @@
         </div>
         <div class="control-row">
           <label for="select-guard">Impact Guard Profile</label>
-          <select id="select-guard">
+          <select id="select-guard" data-info="subsys-guard">
             <option value="R">Setting R (Hardened Default: v_min=6, 20ms, no hold, 40%)</option>
             <option value="5">Level 5 (Factory Default: v_min=1, 50ms, 500mA hold — Collapse Bug)</option>
             <option value="0">Level 0 (Off: 1000 mA Current Limit Only)</option>
           </select>
         </div>
         <div class="btn-grid">
-          <button id="btn-push-test" class="btn btn-danger" type="button">Push Impulse (7.5 rad/s)</button>
-          <button id="btn-pickup-toggle" class="btn btn-purple" type="button">Pick Up Duck (Hand)</button>
-          <button id="btn-relax" class="btn" type="button">Rest / Recover</button>
-          <button id="btn-reset-pos" class="btn" type="button">Home &amp; Reset</button>
+          <button id="btn-push-test" class="btn btn-danger" data-info="subsys-impulse" type="button">Push Impulse (7.5 rad/s)</button>
+          <button id="btn-pickup-toggle" class="btn btn-purple" data-info="subsys-pickup" type="button">Pick Up Duck (Hand)</button>
+          <button id="btn-relax" class="btn" data-info="subsys-sit" type="button">Rest / Recover</button>
+          <button id="btn-reset-pos" class="btn" data-info="subsys-reset" type="button">Home &amp; Reset</button>
         </div>
       </article>
     </section>
@@ -145,27 +145,27 @@
     <!-- CENTER COLUMN: 3D Digital Twin Viewport + 61-D Observation & Telemetry -->
     <section class="col-stack">
       <article class="card viewport-card">
-        <div class="viewport-wrap">
+        <div class="viewport-wrap" data-info="subsys-viewport">
           <canvas id="sim-3d-canvas"></canvas>
 
           <div class="viewport-overlay-top">
             <div class="hud-chip-group">
-              <button id="btn-toggle-mesh" class="hud-chip active" type="button">[M] Rig: Articulated CAD (duck.bin)</button>
-              <select id="select-colorway" class="hud-chip" aria-label="Hardware Colorway" style="width:auto; max-width:260px; background:rgba(15,23,42,0.9); color:var(--text); border:1px solid rgba(148,163,184,0.35); cursor:pointer;">
+              <button id="btn-toggle-mesh" class="hud-chip active" data-info="subsys-viewport" type="button">[M] Rig: Articulated CAD (duck.bin)</button>
+              <select id="select-colorway" class="hud-chip" data-info="subsys-colorway" aria-label="Hardware Colorway" style="width:auto; max-width:260px; background:rgba(15,23,42,0.9); color:var(--text); border:1px solid rgba(148,163,184,0.35); cursor:pointer;">
                 <option value="white_orange" selected>Colorway: Classic White &amp; Orange</option>
                 <option value="sky_blue">Colorway: Sky Blue &amp; Orange</option>
                 <option value="lavender_yellow">Colorway: Lavender &amp; Cyan</option>
                 <option value="slate_purple">Colorway: Stealth Slate &amp; Purple</option>
                 <option value="cad_raw">Colorway: Raw CAD (duck.bin)</option>
               </select>
-              <button id="btn-toggle-roller-skates" class="hud-chip" type="button">Roller Skates (V5 STL)</button>
-              <button id="btn-toggle-tof-rays" class="hud-chip active" type="button">8×8 ToF Rays</button>
-              <button id="btn-mode-autod" class="hud-chip" type="button">autod Brain</button>
-              <button id="btn-mode-laser" class="hud-chip" type="button">Laser Chase</button>
-              <button id="btn-mode-soccer" class="hud-chip" type="button">Auto Soccer</button>
+              <button id="btn-toggle-roller-skates" class="hud-chip" data-info="subsys-roller" type="button">Roller Skates (V5 STL)</button>
+              <button id="btn-toggle-tof-rays" class="hud-chip active" data-info="subsys-tof" type="button">8×8 ToF Rays</button>
+              <button id="btn-mode-autod" class="hud-chip" data-info="subsys-autod" type="button">autod Brain</button>
+              <button id="btn-mode-laser" class="hud-chip" data-info="subsys-laser" type="button">Laser Chase</button>
+              <button id="btn-mode-soccer" class="hud-chip" data-info="subsys-soccer" type="button">Auto Soccer</button>
             </div>
             <div class="hud-chip-group">
-              <button id="btn-cam-follow" class="hud-chip active" type="button">Follow Cam</button>
+              <button id="btn-cam-follow" class="hud-chip active" data-info="subsys-viewport" type="button">Follow Cam</button>
             </div>
           </div>
 
@@ -183,6 +183,23 @@
             <span id="hud-pose-readout">Click floor to place Laser Dot · Drag to Orbit</span>
           </div>
         </div>
+
+        <!-- Subsystem Inspector HUD Bar (Claude Architecture) -->
+        <section id="subsystem-inspector-bar" data-tone="cyan" role="status" aria-live="polite" aria-label="Subsystem Inspector">
+          <div class="si-badge-col">
+            <span class="si-dot" aria-hidden="true"></span>
+            <span class="si-badge" id="si-badge">INSPECTOR</span>
+          </div>
+          <div class="si-main">
+            <div class="si-title" id="si-title">Subsystem Inspector Active</div>
+            <div class="si-text" id="si-text">Hover over any control, sensor, joint or skill to inspect live subsystem kinematics and telemetry.</div>
+          </div>
+          <div class="si-facts" id="si-facts" aria-label="Key facts">
+            <div>50 Hz Loop</div>
+            <div>15-DOF</div>
+            <div>SE(3) Kinematics</div>
+          </div>
+        </section>
 
         <div class="metrics-grid">
           <div class="metric-box"><span>Odometry (X, Y)</span><strong id="m-odom">0.00, 0.00 m</strong></div>
@@ -234,7 +251,7 @@
         </div>
       </article>
 
-      <article class="card">
+      <article class="card" data-info="subsys-obs61">
         <div class="card-header">
           <h2>Live 61-D Policy Observation Vector (`obs[1,61]`)</h2>
           <span class="mono-tag">duck-control/src/obs.rs</span>
@@ -419,6 +436,6 @@
     </div>
   </div>
 
-  <script src="simulator.js"></script>
+  <script src="simulator.js?v=0.3.6"></script>
 </body>
 </html>
