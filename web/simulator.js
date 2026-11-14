@@ -503,6 +503,7 @@
   const duckCadContainer = new THREE.Group();
   duckCadContainer.rotation.x = -Math.PI / 2;
   duckWorldRoot.add(duckCadContainer);
+  const _cadFloorBox = new THREE.Box3();
 
   // FLUX AI Mesh Container
   const fluxAiContainer = new THREE.Group();
@@ -2002,14 +2003,16 @@
         state.vetbook.metersWalked += Math.hypot(dx, dz);
       }
 
-      // Seated posture (flat-sole knee bend: dh = +0.52, dk = +1.04, da = dk - dh = +0.52)
+      // Seated posture (folds knees back under body, splays hips neatly, and settles trunk on floor)
       if (state.isSeated) {
-        action14[2] = 0.52;
-        action14[3] = 1.04;
-        action14[4] = 0.52;
-        action14[11] = -0.52;
-        action14[12] = -1.04;
-        action14[13] = -0.52;
+        action14[1] = 0.24;
+        action14[2] = -0.35;
+        action14[3] = 1.25;
+        action14[4] = -0.65;
+        action14[10] = -0.24;
+        action14[11] = 0.35;
+        action14[12] = -1.25;
+        action14[13] = 0.65;
       }
 
       // Active one-shot skill overlay (Claude Endgegner Physics-Grounded Kinematics)
@@ -2119,6 +2122,11 @@
     if (state.activeMesh === "cad") {
       applyJointsToCadGroups(cadBodyGroups, state.joints, mouthOpen);
       syncRollerFootVisibility();
+      duckCadContainer.updateMatrixWorld(true);
+      _cadFloorBox.setFromObject(duckCadContainer);
+      if (_cadFloorBox.min.y < 0.0005) {
+        duckWorldRoot.position.y += (0.0005 - _cadFloorBox.min.y);
+      }
       const showRoller = state.locomotionMode === "roller" || state.rollerSkatesForced;
       if (showRoller) {
         const moveSpeed = Math.abs(state.cmd.vx) > 0.005 ? state.cmd.vx : (speed > 0.01 ? speed : 0);
