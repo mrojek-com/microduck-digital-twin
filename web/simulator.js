@@ -650,70 +650,86 @@
     }
   }
 
-  // Load ground-truth CAD rig & FLUX AI GLB
-  fetch("assets/models/microduck_cad_rig.json")
-    .then((r) => r.json())
-    .then((rig) => {
-      cadRigData = rig;
-      cadBodyGroups = buildCadRigInThree(rig, duckCadContainer);
-      // Shift Z-up container slightly so Home Pose feet rest flush on Y=0
-      const footOffset = rig.home_pose_stats ? rig.home_pose_stats.foot_offset_y : 0;
-      duckCadContainer.position.y = footOffset;
-      applyJointsToCadGroups(cadBodyGroups, state.joints);
-      const selectColorway = document.getElementById("select-colorway");
-      applyColorway(duckCadContainer, selectColorway ? selectColorway.value : "white_orange");
-      tryAttachRollerWheels();
-      pushLog("CAD", `Loaded duck.bin rig (${rig.bodies.length} bodies, ${rig.parts.length} parts).`);
+  // Load ground-truth CAD rig & V5 Roller Tire (synchronously from bundle if available so file:// & http:// work in 0ms)
+  function mountCadRig(rig) {
+    if (!rig || cadRigData) return;
+    cadRigData = rig;
+    cadBodyGroups = buildCadRigInThree(rig, duckCadContainer);
+    // Shift Z-up container slightly so Home Pose feet rest flush on Y=0
+    const footOffset = rig.home_pose_stats ? rig.home_pose_stats.foot_offset_y : 0;
+    duckCadContainer.position.y = footOffset;
+    applyJointsToCadGroups(cadBodyGroups, state.joints);
+    const selectColorway = document.getElementById("select-colorway");
+    applyColorway(duckCadContainer, selectColorway ? selectColorway.value : "white_orange");
+    tryAttachRollerWheels();
+    pushLog("CAD", `Loaded duck.bin rig (${rig.bodies.length} bodies, ${rig.parts.length} parts).`);
 
-      // Build 3 companion ducks for the 4-Duck Chorale with distinct authentic hardware colorways
-      const choirOffsets = [
-        { x: -0.35, z: -0.18, yaw: 0.45, colorway: "sky_blue" },
-        { x: 0.35, z: -0.18, yaw: -0.45, colorway: "lavender_yellow" },
-        { x: 0.0, z: -0.38, yaw: 0.0, colorway: "slate_purple" },
-      ];
-      choirOffsets.forEach((cfg) => {
-        const cRoot = new THREE.Group();
-        cRoot.position.set(cfg.x, 0, cfg.z);
-        cRoot.rotation.y = cfg.yaw;
-        const cCad = new THREE.Group();
-        cCad.rotation.x = -Math.PI / 2;
-        cCad.position.y = footOffset;
-        cRoot.add(cCad);
-        const cGroups = buildCadRigInThree(rig, cCad);
-        applyJointsToCadGroups(cGroups, DEFAULT_POSITION);
-        applyColorway(cCad, cfg.colorway);
-        choirGroup.add(cRoot);
-      });
-    })
-    .catch((err) => pushLog("ERR", `CAD rig load failed: ${err}`));
+    // Build 3 companion ducks for the 4-Duck Chorale with distinct authentic hardware colorways
+    const choirOffsets = [
+      { x: -0.35, z: -0.18, yaw: 0.45, colorway: "sky_blue" },
+      { x: 0.35, z: -0.18, yaw: -0.45, colorway: "lavender_yellow" },
+      { x: 0.0, z: -0.38, yaw: 0.0, colorway: "slate_purple" },
+    ];
+    choirOffsets.forEach((cfg) => {
+      const cRoot = new THREE.Group();
+      cRoot.position.set(cfg.x, 0, cfg.z);
+      cRoot.rotation.y = cfg.yaw;
+      const cCad = new THREE.Group();
+      cCad.rotation.x = -Math.PI / 2;
+      cCad.position.y = footOffset;
+      cRoot.add(cCad);
+      const cGroups = buildCadRigInThree(rig, cCad);
+      applyJointsToCadGroups(cGroups, DEFAULT_POSITION);
+      applyColorway(cCad, cfg.colorway);
+      choirGroup.add(cRoot);
+    });
+  }
 
-  fetch("assets/models/xgoduck_v5_tire.json")
-    .then((r) => r.json())
-    .then((tire) => {
-      tireAssetData = tire;
-      tryAttachRollerWheels();
-    })
-    .catch((err) => pushLog("STL", `Roller wheel STL pending: ${err}`));
+  if (window.__MICRODUCK_V5_TIRE__) {
+    tireAssetData = window.__MICRODUCK_V5_TIRE__;
+  } else {
+    fetch("assets/models/xgoduck_v5_tire.json")
+      .then((r) => r.json())
+      .then((tire) => {
+        tireAssetData = tire;
+        tryAttachRollerWheels();
+      })
+      .catch((err) => pushLog("STL", `Roller wheel STL pending: ${err}`));
+  }
 
-  const gltfLoader = new THREE.GLTFLoader();
-  gltfLoader.load(
-    "assets/models/xgoduck_v5_stl_kit.glb",
-    (gltf) => {
-      const model = gltf.scene;
-      model.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-      fluxAiContainer.add(model);
-      pushLog("STL-KIT", "Loaded XGO-Duck V5 50-STL Kit Platter (xgoduck_v5_stl_kit.glb).");
-    },
-    undefined,
-    () => {
-      pushLog("STL-KIT", "XGO-Duck V5 STL Kit GLB not loaded; articulated CAD rig active.");
-    }
-  );
+  if (window.__MICRODUCK_CAD_RIG__) {
+    mountCadRig(window.__MICRODUCK_CAD_RIG__);
+  } else {
+    fetch("assets/models/microduck_cad_rig.json")
+      .then((r) => r.json())
+      .then((rig) => mountCadRig(rig))
+      .catch((err) => pushLog("ERR", `CAD rig load failed: ${err}`));
+  }
+
+  let stlKitLoaded = false;
+  function ensureStlKitPlatterLoaded() {
+    if (stlKitLoaded) return;
+    stlKitLoaded = true;
+    const gltfLoader = new THREE.GLTFLoader();
+    gltfLoader.load(
+      "assets/models/xgoduck_v5_stl_kit.glb",
+      (gltf) => {
+        const model = gltf.scene;
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+        fluxAiContainer.add(model);
+        pushLog("STL-KIT", "Loaded XGO-Duck V5 50-STL Kit Platter (xgoduck_v5_stl_kit.glb).");
+      },
+      undefined,
+      () => {
+        pushLog("STL-KIT", "XGO-Duck V5 STL Kit GLB not loaded; articulated CAD rig active.");
+      }
+    );
+  }
 
   // Raycast click on arena floor to move Laser Dot
   const raycaster = new THREE.Raycaster();
@@ -2082,6 +2098,7 @@
 
   function toggleMeshMode() {
     if (state.activeMesh === "cad") {
+      ensureStlKitPlatterLoaded();
       state.activeMesh = "flux_ai";
       duckCadContainer.visible = false;
       fluxAiContainer.visible = true;

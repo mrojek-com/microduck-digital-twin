@@ -284,6 +284,20 @@ def main() -> None:
     }
     catalog_path = MODELS_DIR / "xgoduck_stl_catalog.json"
     catalog_path.write_text(json.dumps(catalog, indent=2), encoding="utf-8")
+
+    # Emit synchronous JS bundle (`microduck_cad_bundle.js`) so the 3D CAD rig & V5 roller tires
+    # load in 0 ms on frame 1 even when `web/index.html` is opened directly via `file://`
+    rig_json_path = MODELS_DIR / "microduck_cad_rig.json"
+    tire_json_path = MODELS_DIR / "xgoduck_v5_tire.json"
+    if rig_json_path.exists() and tire_json_path.exists():
+        bundle_js = MODELS_DIR / "microduck_cad_bundle.js"
+        bundle_js.write_text(
+            f"window.__MICRODUCK_CAD_RIG__ = {rig_json_path.read_text(encoding='utf-8').strip()};\n"
+            f"window.__MICRODUCK_V5_TIRE__ = {tire_json_path.read_text(encoding='utf-8').strip()};\n",
+            encoding="utf-8",
+        )
+        print(f"[✓] Synchronous CAD + Tire JS bundle: {bundle_js.relative_to(PROJECT_ROOT)} ({bundle_js.stat().st_size // 1024} KB)")
+
     print(f"[✓] Cataloged {catalog['summary']['total_stl_count']} real STLs ({len(v2_entries)} V2 + {len(v5_entries)} V5)")
     print(f"[✓] Real CAD slicer STL: {slicer_info['path']} ({slicer_info['faces']} tris, extents {slicer_info['extents_mm']} mm)")
     print(f"[✓] V5 STL Kit GLB: {kit_info['kit_glb']} ({kit_info['total_faces']} tris, {kit_info['size_bytes']//1024} KB)")
