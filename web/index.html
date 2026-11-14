@@ -28,7 +28,6 @@
     <div class="top-actions">
       <span id="pill-health" class="pill pill-ok">HEALTHY</span>
       <span id="pill-mode" class="pill pill-warn">MODE: WALK</span>
-      <button id="btn-open-flux" class="btn btn-primary" type="button">FLUX Gallery &amp; 3D STL</button>
       <button id="btn-open-cheat" class="btn btn-cyan" type="button">Cheat Sheet</button>
       <button id="btn-open-vetbook" class="btn" type="button">VetBook</button>
     </div>
@@ -364,84 +363,6 @@
     </section>
   </main>
 
-  <!-- FLUX GALLERY & 3D STL MODAL -->
-  <div id="modal-flux" class="modal" role="dialog" aria-modal="true" aria-label="FLUX Studio Gallery">
-    <div class="modal-card">
-      <div class="card-header">
-        <h2>Official Hardware Reference Colorways, FLUX.1 Renders &amp; 3D STL Mesh</h2>
-        <button id="btn-close-flux" class="btn" type="button">Close</button>
-      </div>
-      <p style="font-size:0.82rem; color:var(--muted); margin-bottom:10px;">
-        Real CAD/STL geometry from <code>pollen-robotics/microduck</code> (<code>duck.bin</code>) &amp; <code>LuwuDynamics/xgoduck_hardware</code> (97 real printable STLs: 47 V2 + 50 V5), plus local FLUX.1 hardware-conditioned renders.
-        <a id="stl-download-link" href="assets/models/microduck_3d_print.stl" download="microduck_3d_print.stl" style="color:var(--accent); font-weight:600; margin-left:8px;">Download Full Articulated CAD STL (270mm)</a>
-      </p>
-      <h3 style="font-size:0.88rem; color:var(--emerald); margin:10px 0 6px;">Official XGO-Duck 97-STL Part Browser &amp; Direct Downloads (<code>LuwuDynamics/xgoduck_hardware</code>)</h3>
-      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
-        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_FACE.stl" download>V5 Face Shell STL</a>
-        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_JAW.stl" download>V5 Lower Jaw STL</a>
-        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_BODY_SHELL_LEFT.stl" download>V5 Body Shell L STL</a>
-        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_THIGH_LEFT_SHELL.stl" download>V5 Thigh Shell L STL</a>
-        <a class="btn btn-cyan" href="assets/models/stl/V5_AUDIO_VIDEO_LEFT_FOOT.stl" download>V5 Left Foot STL</a>
-        <a class="btn btn-primary" href="assets/models/stl/V5_AUDIO_VIDEO_FOOT_BOTTOM_TPU_01.stl" download>V5 Foot Sole TPU STL</a>
-        <a class="btn btn-purple" href="assets/models/stl/V5_AUDIO_VIDEO_TIRE_01.stl" download>V5 Roller Skate Tire STL</a>
-        <a class="btn" href="assets/models/stl/V2_STANDARD_HEAD_COVER.stl" download>V2 Head Cover STL</a>
-        <a class="btn" href="assets/models/xgoduck_stl_catalog.json" target="_blank">97-STL JSON Catalog</a>
-      </div>
-      <div class="flux-grid" id="xgoduck-photo-grid" style="margin-bottom:14px;">
-        <figure class="flux-item">
-          <img src="assets/flux/xgo-duck-hero.jpg" alt="XGO-Duck Hardware Prototype">
-          <figcaption><strong>XGO-Duck Hardware Build:</strong> 15× Feetech 1910 servos, Arduino UNO Q, Luwu V1.1 PCBA, printable STL kit.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/xgo-duck-open-beak.jpg" alt="XGO-Duck Open Beak">
-          <figcaption><strong>V5 Face &amp; Articulated Jaw:</strong> Dual TPU beak inserts (ID 34) with camera + ToF + ring light.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/xgo-duck-rear.jpg" alt="XGO-Duck Rear UNO Q Stack">
-          <figcaption><strong>Rear Backpack Stack:</strong> Arduino UNO Q (Linux ONNX host + STM32 servo bus bridge) &amp; QMI8658A IMU.</figcaption>
-        </figure>
-      </div>
-      <h3 style="font-size:0.88rem; color:var(--cyan); margin:10px 0 6px;">Official Hardware Reference Colorways</h3>
-      <div class="flux-grid" id="ref-gallery-grid" style="margin-bottom:14px;">
-        <figure class="flux-item">
-          <img src="assets/flux/ref_microduck_white_orange.jpg" alt="Classic White & Orange MicroDuck">
-          <figcaption><strong>Classic White &amp; Orange:</strong> Studio profile — arched visor hood, yellow camera ring, hinged orange lower jaw &amp; XL330 neck.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/ref_microduck_sky_blue.png" alt="Sky Blue & Orange MicroDuck">
-          <figcaption><strong>Sky Blue &amp; Orange:</strong> Pastel sky-blue 3D-printed shells, single camera-ring eye, ToF slot, and orange/yellow feet.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/ref_microduck_lavender.jpg" alt="Lavender & Cyan MicroDuck">
-          <figcaption><strong>Lavender &amp; Cyan:</strong> Sitting crouch stance with lavender shells, cyan camera bezel, and yellow beak trim.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/ref_microduck_slate_purple.jpg" alt="Stealth Slate & Purple MicroDuck">
-          <figcaption><strong>Stealth Slate &amp; Purple:</strong> Dark slate-grey printed shells, purple camera bezel &amp; soles, bright yellow jaw.</figcaption>
-        </figure>
-      </div>
-      <h3 style="font-size:0.88rem; color:var(--accent); margin:10px 0 6px;">Local FLUX.1 (MLX 4-bit img2img) Renders &amp; TripoSR 3D Source</h3>
-      <div class="flux-grid" id="flux-gallery-grid">
-        <figure class="flux-item">
-          <img src="assets/flux/flux_microduck_hero_studio.png" alt="MicroDuck Alpha Hero Studio Render">
-          <figcaption><strong>Hero Studio Render (White &amp; Orange):</strong> Hardware-conditioned studio shot alongside TripoSR 3D mesh (<code>microduck_flux_ai.glb</code>).</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/flux_microduck_cyber_bench.png" alt="MicroDuck Stealth Slate on Workbench">
-          <figcaption><strong>RK3566 &amp; XL330 Workbench (Stealth Slate):</strong> 15-servo UART bus, 8×8 ToF VL53L8CX, and 50 Hz RL telemetry.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/flux_microduck_soccer_arena.png" alt="MicroDuck Soccer Arena">
-          <figcaption><strong>Autonomous Soccer (Sky Blue &amp; Orange):</strong> Purple ball &amp; red laser YUV vision tracking arena.</figcaption>
-        </figure>
-        <figure class="flux-item">
-          <img src="assets/flux/flux_microduck_chorale_choir.png" alt="MicroDuck 4-Part Chorale">
-          <figcaption><strong>4-Duck BLE Chorale (Lavender &amp; Yellow):</strong> NTP-free ±20 ms beacon phase-locked vocal ensemble.</figcaption>
-        </figure>
-      </div>
-    </div>
-  </div>
-
   <!-- CHEATSHEET MODAL -->
   <div id="modal-cheat" class="modal" role="dialog" aria-modal="true" aria-label="MicroDuck Cheat Sheet">
     <div class="modal-card">
@@ -464,7 +385,7 @@
     </div>
   </div>
 
-  <script src="assets/models/microduck_cad_bundle.js?v=0.4.0"></script>
-  <script src="simulator.js?v=0.4.0"></script>
+  <script src="assets/models/microduck_cad_bundle.js?v=0.4.1"></script>
+  <script src="simulator.js?v=0.4.1"></script>
 </body>
 </html>

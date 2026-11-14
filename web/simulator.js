@@ -883,12 +883,12 @@
     inlineRollerMeshes.forEach((m) => { m.visible = showRoller; });
   }
 
-  // True RANSAC-fitted physical jaw hinge pivot (`JAW_HINGE_LOCAL = [0, 0.00004, 0.0075]`, `JAW_MAX_OPEN = 0.32 rad`)
-  // Adapted from MJLab duck.js (Apache-2.0)
+  // True RANSAC-fitted physical jaw hinge pivot (`JAW_HINGE_LOCAL = [0, 0.00004, 0.0075]` in jaw.stl -> `[0.0030, 0, -0.01796]` in body 9)
+  // In body 9 (`jaw_soft`), `jaw.stl` has `quat = [0.5, 0.5, 0.5, 0.5]`, mapping the robot's left-right pitch axle to body-local `+Y` (`[0, 1, 0]`).
   function setupPhysicalJawPivot(headRollGroup, jawMeshes) {
     if (!headRollGroup || !jawMeshes.length) return null;
     const pivot = new THREE.Group();
-    pivot.position.set(0, 0.00004, 0.0075);
+    pivot.position.set(0.0030, 0.0, -0.01796);
     headRollGroup.add(pivot);
     jawMeshes.forEach((m) => {
       m.position.sub(pivot.position);
@@ -906,11 +906,18 @@
       return computeCreasedGeometry(m.verts, m.tris);
     });
 
-    const groups = rig.bodies.map((b) => {
+    const kinLegs = window.__MICRODUCK_KIN_LEGS__;
+    const hasKinLegs = Boolean(kinLegs && kinLegs.bodies && kinLegs.bodies.length === 15);
+
+    const groups = rig.bodies.map((b, idx) => {
+      const kb = hasKinLegs ? kinLegs.bodies[idx] : null;
+      const pos = kb && kb.pos ? kb.pos : b.pos;
+      const quat = kb && kb.quat ? kb.quat : b.quat;
+      const axis = kb && kb.joint && kb.joint.axis ? kb.joint.axis : b.axis;
       const grp = new THREE.Group();
-      grp.position.set(b.pos[0], b.pos[1], b.pos[2]);
-      grp.userData.baseQuat = new THREE.Quaternion(b.quat[1], b.quat[2], b.quat[3], b.quat[0]).normalize();
-      grp.userData.axis = new THREE.Vector3(b.axis[0], b.axis[1], b.axis[2]).normalize();
+      grp.position.set(pos[0], pos[1], pos[2]);
+      grp.userData.baseQuat = new THREE.Quaternion(quat[1], quat[2], quat[3], quat[0]).normalize();
+      grp.userData.axis = new THREE.Vector3(axis[0], axis[1], axis[2]).normalize();
       grp.userData.jointIdx = b.joint;
       grp.quaternion.copy(grp.userData.baseQuat);
       return grp;
@@ -925,10 +932,9 @@
     });
 
     // If `kinematics.json` is available, build from its full 70-part list (includes lens, eye rings, m12 mount, PCBs)
-    const kinLegs = window.__MICRODUCK_KIN_LEGS__;
     const jawMeshes = [];
 
-    if (kinLegs && kinLegs.bodies && kinLegs.bodies.length === 15) {
+    if (hasKinLegs) {
       const nameToMeshIdx = {};
       DUCK_BIN_MESH_NAMES.forEach((n, i) => { nameToMeshIdx[n] = i; });
 
@@ -1046,7 +1052,7 @@
     }
     if (jawPivotGroup) {
       const clamped = Math.max(0, Math.min(1, mouthOpenRatio));
-      jawPivotGroup.rotation.set(0, 0, -clamped * 0.32); // JAW_MAX_OPEN = 0.32 rad around -Z
+      jawPivotGroup.rotation.set(0, clamped * 0.32, 0); // JAW_MAX_OPEN = 0.32 rad around body-9 +Y (left-right beak pitch axle)
     }
   }
 
@@ -3190,13 +3196,13 @@ function onStep(t, dt, duck) {
     if (["a", "d", "arrowleft", "arrowright"].includes(k)) state.cmd.vyaw = 0;
   });
 
-  // Modals (FLUX Gallery, Cheat Sheet, VetBook)
+  // Modals (Cheat Sheet, VetBook, optional FLUX Gallery)
   const modalFlux = document.getElementById("modal-flux");
   const modalCheat = document.getElementById("modal-cheat");
   const modalVetbook = document.getElementById("modal-vetbook");
 
-  document.getElementById("btn-open-flux").addEventListener("click", () => modalFlux.classList.add("open"));
-  document.getElementById("btn-close-flux").addEventListener("click", () => modalFlux.classList.remove("open"));
+  document.getElementById("btn-open-flux")?.addEventListener("click", () => modalFlux?.classList.add("open"));
+  document.getElementById("btn-close-flux")?.addEventListener("click", () => modalFlux?.classList.remove("open"));
 
   const selectColorwayEl = document.getElementById("select-colorway");
   if (selectColorwayEl) {
