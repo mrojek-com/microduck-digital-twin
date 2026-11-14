@@ -263,6 +263,10 @@
             <span id="code-status-text">Status: Ready — Select a preset or press ▶ Run (⌘↵)</span>
             <span id="code-api-hint" class="code-api-chips">
               <button type="button" class="api-chip" data-snippet="const imu = duck.readImu();" title=" { roll, pitch, yaw, tilt_deg, gyro, is_fallen }">readImu()</button>
+              <button type="button" class="api-chip" data-snippet="const odom = duck.readOdometry();" title=" { anchor_set: 'alpha16', anchor_foot, drift_alpha16_mm, drift_v15_mm }">readOdometry()</button>
+              <button type="button" class="api-chip" data-snippet="const bus = duck.readBusSlow();" title=" { volts, temps_c, currents_ma, pwm_counts, remote_io_protocol: 1 }">readBusSlow()</button>
+              <button type="button" class="api-chip" data-snippet="const pet = duck.readPetting();" title=" { is_petting, probability, maploc_stopped, maploc_keyframes }">readPetting()</button>
+              <button type="button" class="api-chip" data-snippet="const pad = duck.readPadImu();" title=" { calibrated, bias_dps, dead_radio_trap_detected }">readPadImu()</button>
               <button type="button" class="api-chip" data-snippet="const tgt = duck.readTarget();" title=" { pose, laser: {dist, bearing_rad}, ball: {dist, bearing_rad} }">readTarget()</button>
               <button type="button" class="api-chip" data-snippet="const tof = duck.readTof();" title=" { distance_m, raw_mm, hand_present, min_zone_m }">readTof()</button>
               <button type="button" class="api-chip" data-snippet="duck.setJointOffset('neck_pitch', 0.15);" title="Add radian offset to DEFAULT_POSITION[i]">setJointOffset()</button>

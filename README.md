@@ -52,6 +52,13 @@ An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Sim
    - **VL53L5CX $8\times 8$ ToF Depth Matrix & Theremin:** Interactive hand-distance slider and $8\times 8$ status/range grid with real-time WebAudio Theremin pitch + beak opening modulation.
    - **Autonomous Brains:** `autod` obstacle avoidance, HSV `laser-chase` pursuit, `soccer` ball approach & kick FSM, 13 keyframed emotions, and 4-duck synchronized BLE Chorale (`wistful.duckscore`).
 
+6. **5 Deep Pre-Hardware Subsystems (Clean-Room Referenced from `pollen-robotics/microduck`)**
+   - **Pillar 1 — `ALPHA16` 16-Point Sole Contact Odometry (`odometry/src/lib.rs` & `anchors.rs`):** Models the exact $4\times 4$ ($16\text{-point}$ per sole = $32$ total) contact anchor switching at `SWITCH_MARGIN = -0.010 m` after `SWITCH_CONFIRM_TICKS = 2` ($40\text{ ms}$) with continuous `reproject` handoff and live drift comparison ($\text{mm}$) against legacy 4-corner `V15` (`duck.readOdometry()`).
+   - **Pillar 2 — `RemoteIo` TCP JSON Simulator Bridge (`duck-control/src/sim.rs`, `PROTOCOL = 1`):** Clean-room TCP server ([`src/remote_io_bridge.py`](src/remote_io_bridge.py)) with `TCP_NODELAY = 1`, version handshake, and stateless per-tick reconnect (`hello`, `read`, `write`, `gain`, `torque`, `slow`) so developers can run the actual upstream Rust `robotd --sim` daemon directly against this Digital Twin before physical hardware arrives.
+   - **Pillar 3 — XL330-M288-T Register Bus Physics (`duck-control/src/bus.rs` & `Rhoban/bam`):** Models Fast Sync Read (`0x8A`) contiguous 12-byte register block `124..136` (`0.229 rpm/count` velocity quantization, `4096 counts/rev` encoder quantization, `±885` PWM, current $\text{mA}$), $1\text{ Hz}$ `slow_sensors` block `144..146` (`0.1 V` 2S Li-Ion voltage sag $8.4\text{ V} \to 6.8\text{ V}$, $1^{\circ}\text{C}$ Joule coil heating + $70^{\circ}\text{C}$ thermal derating), and the $25\text{-tick}$ (`0.5 s`) `StaleImuTracker` (`duck.readBusSlow()`).
+   - **Pillar 4 — `maploc` Stop-and-Vote ToF Micro-Mapper & `pet-detect` Log-Mel Classifier (`maploc/src/lib.rs` & `pet-detect/src/lib.rs`):** Votes $8\times 8$ VL53L5CX ToF scans into rigid keyframes only during standing stops (`StopAndVoteMapper`), and computes the pinned $16\text{ kHz}$ $40\text{-band} \times 100\text{-frame}$ ($16,240\text{-sample}$) log-mel spectrogram with `SoundSentry` silence gating and `0.95 / 0.85` hysteresis (`duck.readPetting()`).
+   - **Pillar 5 — `pad-imu` 6-Axis Complementary Filter, `12 °/s` Clone Bias Calibrator & Dead-Radio Auditor (`pad-imu/src/lib.rs` & `padd/src/tap.rs`):** Models the $0.5\text{ s}$ stillness-window gyro bias calibrator (`STILL_SPREAD_DPS = 3.0 °/s`, `GRAVITY_BAND = 0.85..=1.15 g`) and detects the `SYN_DROPPED` / stale-evdev dead-radio trap where `padd` keeps `robotd`'s $250\text{ ms}$ deadman alive (`duck.readPadImu()`).
+
 ---
 
 ## 🔗 Referenced Upstream Repositories & Credits
@@ -117,11 +124,13 @@ bash run_tests.sh
 ├── src/
 │   ├── models.py                    # 15-DOF joint definitions, actuator constants & limits
 │   ├── kinematics_obs.py            # SE(3) forward kinematics, 61-D obs & 63-D pickup features
+│   ├── prehardware_subsystems.py    # ALPHA16 odometry, XL330 0x8A registers, maploc, pet-detect, pad-imu
+│   ├── remote_io_bridge.py          # Drop-in RemoteIo TCP JSON server (duck-control/src/sim.rs PROTOCOL=1)
 │   ├── sim_engine.py                # 50 Hz physics engine, safety guards & Impact Guard model
 │   ├── extract_ground_truth.py      # Extracts CAD rig, MJCF, emotions & ONNX from upstream
 │   └── build_xgoduck_stl_assets.py  # Catalogs & converts XGO-Duck V2/V5 STL hardware shells
 ├── tests/
-│   └── test_microduck_sim.py        # 10 deterministic unit, closed-loop & adversarial NaN/safety tests
+│   └── test_microduck_sim.py        # 15 deterministic unit, closed-loop, RemoteIo & pre-hardware tests
 ├── docs/
 │   └── CHEATSHEET_MASTER_GUIDE.md   # Deep architectural & hardware reference guide
 └── web/

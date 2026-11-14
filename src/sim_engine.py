@@ -34,6 +34,13 @@ from models import (
     NUM_JOINTS,
     mouth_target,
 )
+from prehardware_subsystems import (
+    ContactOdometry,
+    LogMelPettingDetector,
+    PadImuFilter,
+    StopAndVoteMapper,
+    Xl330BusSimulator,
+)
 
 
 @dataclass
@@ -77,6 +84,13 @@ class MicroDuckSimulator:
             raise ValueError(f"Unknown impact guard level: {impact_guard_level}")
         self.state = MicroDuckSimState(impact_guard_level=impact_guard_level)
         self._pause_start_pose: Optional[List[float]] = None
+        # Pre-hardware ground-truth subsystems (`pollen-robotics/microduck`)
+        self.odom_alpha16 = ContactOdometry(anchor_set="alpha16", quantize_encoders=True)
+        self.odom_v15 = ContactOdometry(anchor_set="v15", quantize_encoders=True)
+        self.bus = Xl330BusSimulator()
+        self.mapper = StopAndVoteMapper()
+        self.pet_detector = LogMelPettingDetector()
+        self.pad_imu = PadImuFilter()
 
     def set_impact_guard(self, level_id: str) -> None:
         if level_id not in IMPACT_GUARD_PROFILES:
@@ -296,6 +310,21 @@ class MicroDuckSimulator:
             previous_target15=safe15,
             previous_paused=st.safety.picked_up,
         )
+
+        # Update pre-hardware subsystems (`odometry`, `bus.rs`)
+        cy, sy = math.cos(st.yaw_rad * 0.5), math.sin(st.yaw_rad * 0.5)
+        quat_wxyz = [cy, 0.0, 0.0, sy]
+        odom16_snap = self.odom_alpha16.update(st.joints, quat_wxyz)
+        odom15_snap = self.odom_v15.update(st.joints, quat_wxyz)
+        bus_snap = self.bus.step_bus(
+            target_positions15=safe15,
+            actual_positions15=st.joints,
+            actual_velocities15=st.velocities,
+            dt=dt,
+            kp_gain=st.safety.gain,
+        )
+        st.currents_ma = list(bus_snap["currents_ma"])
+
         return {
             "time_s": round(st.time_s, 4),
             "obs61": obs61,
@@ -304,4 +333,7 @@ class MicroDuckSimulator:
             "position_xy": list(st.position_xy),
             "yaw_rad": st.yaw_rad,
             "safety": st.safety,
+            "odometry_alpha16": odom16_snap,
+            "odometry_v15": odom15_snap,
+            "bus": bus_snap,
         }

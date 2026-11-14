@@ -262,7 +262,238 @@ def test_closed_loop_codelab_and_sim_gap_invariants():
         assert f'value="{preset_key}"' in index_html
 
     # 3. Verify ground-truth closed-loop API & Sim-to-Real Reality Gap hooks
-    for api_fn in ("readImu()", "readTarget()", "readTof()", "setJointOffset(", "recover()", "watch(", "assert("):
+    for api_fn in (
+        "readImu()",
+        "readTarget()",
+        "readTof()",
+        "readOdometry()",
+        "readBusSlow()",
+        "readPetting()",
+        "readPadImu()",
+        "setJointOffset(",
+        "recover()",
+        "watch(",
+        "assert(",
+    ):
         assert api_fn in sim_js
     assert "select-sim-gap" in index_html
     assert "code-watch-strip" in index_html
+
+
+def test_pillar1_alpha16_vs_v15_contact_odometry():
+    from prehardware_subsystems import ALPHA16_LEFT, ALPHA16_RIGHT, ContactOdometry, SWITCH_CONFIRM_TICKS
+
+    assert len(ALPHA16_LEFT) == 16 and len(ALPHA16_RIGHT) == 16
+    assert SWITCH_CONFIRM_TICKS == 2
+
+    odom16 = ContactOdometry(anchor_set="alpha16", quantize_encoders=True)
+    odom15 = ContactOdometry(anchor_set="v15", quantize_encoders=True)
+
+    # Initial standing frame seeds anchor_xy so trunk starts at (0, 0)
+    s0 = odom16.update(DEFAULT_POSITION, [1.0, 0.0, 0.0, 0.0])
+    assert math.isclose(s0["position"][0], 0.0, abs_tol=1e-6)
+    assert math.isclose(s0["position"][1], 0.0, abs_tol=1e-6)
+
+    # Simulate alternating right/left stance rolls that dip the opposite sole below -0.010 m
+    sim = MicroDuckSimulator()
+    for _ in range(30):
+        res = sim.step(Command(twist=(0.25, 0.0, 0.1)))
+    assert "odometry_alpha16" in res and "odometry_v15" in res
+
+    # Settle standing for 10 ticks (`odometry/src/lib.rs::the_anchor_switches_only_after_the_claim_holds`)
+    for _ in range(10):
+        s_settled = odom16.update(DEFAULT_POSITION, [1.0, 0.0, 0.0, 0.0])
+    settled_foot = s_settled["anchor_foot"]
+    settled_switches = s_settled["switches"]
+
+    # Roll the trunk so the OTHER foot is clearly lower — for one tick (must NOT switch yet)
+    roll_rad = 0.35 if settled_foot == "left" else -0.35
+    q_roll = [math.cos(roll_rad / 2.0), math.sin(roll_rad / 2.0), 0.0, 0.0]
+    s_bid = odom16.update(DEFAULT_POSITION, q_roll)
+    assert s_bid["anchor_foot"] == settled_foot
+    assert s_bid["switches"] == settled_switches
+
+    # 2nd consecutive tick confirms switch (pending_ticks=2 -> switch!) without teleporting pose
+    s_sw = odom16.update(DEFAULT_POSITION, q_roll)
+    assert s_sw["switches"] == settled_switches + 1
+    assert s_sw["anchor_foot"] != settled_foot
+    assert math.isfinite(s_sw["position"][0]) and math.isfinite(s_sw["position"][1])
+    assert abs(s_sw["position"][0] - s_bid["position"][0]) < 1e-6
+
+
+def test_pillar2_remote_io_tcp_json_protocol():
+    import socket
+    from remote_io_bridge import PROTOCOL_VERSION, RemoteIoSessionHandler, RemoteIoTcpServer
+
+    assert PROTOCOL_VERSION == 1
+
+    # 1. Verify handshake gate rejects pre-handshake operations (Claude Endgegner directive)
+    handler = RemoteIoSessionHandler()
+    pre_err = json.loads(handler.handle_line('{"op":"read"}'))
+    assert "error" in pre_err
+
+    # 2. Verify protocol mismatch is flagged clearly
+    bad_proto = json.loads(handler.handle_line('{"op":"hello","protocol":99,"joints":15}'))
+    assert bad_proto["protocol"] == 1 and "error" in bad_proto
+    assert handler.handshaken is False
+
+    # 3. Verify live loopback TCP server (`TCP_NODELAY`, hello -> read -> write -> gain -> torque -> slow -> stateless reconnect)
+    srv = RemoteIoTcpServer()
+    srv.start()
+    try:
+        def rpc(sock_file, sock_obj, payload_dict):
+            sock_obj.sendall((json.dumps(payload_dict) + "\n").encode("utf-8"))
+            return json.loads(sock_file.readline())
+
+        with socket.create_connection(srv.address, timeout=2.0) as s1:
+            f1 = s1.makefile("r", encoding="utf-8", newline="\n")
+            h = rpc(f1, s1, {"op": "hello", "protocol": 1, "joints": 15})
+            assert h == {"protocol": 1}
+
+            r_frame = rpc(f1, s1, {"op": "read"})
+            assert len(r_frame["positions"]) == 15
+            assert len(r_frame["velocities"]) == 15
+            assert len(r_frame["currents_ma"]) == 15
+            assert len(r_frame["imu"]["quat"]) == 4
+
+            targets = list(DEFAULT_POSITION)
+            targets[0] = 0.25
+            w_ack = rpc(f1, s1, {"op": "write", "targets": targets})
+            assert w_ack == {}
+
+            g_ack = rpc(f1, s1, {"op": "gain", "kp": 180})
+            assert g_ack == {}
+
+            t_ack = rpc(f1, s1, {"op": "torque", "on": True})
+            assert t_ack == {}
+
+            slow = rpc(f1, s1, {"op": "slow"})
+            assert 6.0 <= slow["volts"] <= 8.5
+            assert len(slow["temps_c"]) == 15
+
+        # Stateless reconnect on a new TCP socket after first connection closed
+        with socket.create_connection(srv.address, timeout=2.0) as s2:
+            f2 = s2.makefile("r", encoding="utf-8", newline="\n")
+            h2 = rpc(f2, s2, {"op": "hello", "protocol": 1, "joints": 15})
+            assert h2 == {"protocol": 1}
+            r2 = rpc(f2, s2, {"op": "read"})
+            assert math.isclose(r2["positions"][0], 0.25, abs_tol=0.005)
+    finally:
+        srv.stop()
+
+
+def test_pillar3_xl330_fast_sync_read_and_slow_sensors():
+    import struct
+    from prehardware_subsystems import (
+        RAD_PER_COUNT,
+        RAD_PER_SEC_PER_COUNT,
+        STALE_RUN_WARN,
+        StaleImuTracker,
+        Xl330BusSimulator,
+        quantize_xl330_position_rad,
+        quantize_xl330_velocity_rad_s,
+    )
+
+    # 1. Verify exact 0.229 rpm/count velocity quantization and 4096-count position quantization
+    q_vel = quantize_xl330_velocity_rad_s(RAD_PER_SEC_PER_COUNT * 7.3)
+    assert math.isclose(q_vel, RAD_PER_SEC_PER_COUNT * 7.0, abs_tol=1e-9)
+    q_pos = quantize_xl330_position_rad(RAD_PER_COUNT * 12.4)
+    assert math.isclose(q_pos, RAD_PER_COUNT * 12.0, abs_tol=1e-9)
+
+    # 2. Verify 12-byte Fast Sync Read (`124..136`) and 3-byte Slow Sensors (`144..146`) binary packing
+    bus = Xl330BusSimulator(nominal_volts=8.2, ambient_temp_c=31.0)
+    stalled_targets = [p + 0.8 for p in DEFAULT_POSITION]
+    for _ in range(50):
+        snap = bus.step_bus(stalled_targets, DEFAULT_POSITION, [0.0] * 15, dt=0.02, kp_gain=200)
+    assert snap["bus_volts"] < 8.2  # 2S Li-Ion voltage sag under stall current
+    assert max(snap["temps_c"]) >= 31.0  # Joule coil heating
+
+    fast_blk = bus.pack_fast_sync_read_block(3)
+    assert len(fast_blk) == 12
+    pwm, cur, vel_cnt, pos_cnt = struct.unpack("<hhii", fast_blk)
+    assert -885 <= pwm <= 885 and cur > 0
+
+    slow_blk = bus.pack_slow_sensors_block(3)
+    assert len(slow_blk) == 3
+    v_cnt, t_cnt = struct.unpack("<HB", slow_blk)
+    assert 60 <= v_cnt <= 84 and t_cnt >= 31
+
+    # 3. Verify StaleImuTracker (`STALE_RUN_WARN = 25` identical 12-byte SFLP blocks)
+    tracker = StaleImuTracker()
+    sample_block = b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c"
+    assert tracker.observe(sample_block) == 0
+    for _ in range(STALE_RUN_WARN):
+        tracker.observe(sample_block)
+    assert tracker.is_frozen_warn is True
+    assert tracker.observe(b"\x00" * 12) == 0
+    assert tracker.is_frozen_warn is False
+
+
+def test_pillar4_maploc_stop_and_vote_and_pet_detect_log_mel():
+    from prehardware_subsystems import (
+        LOG_EPS,
+        N_MELS,
+        WINDOW_FRAMES,
+        WINDOW_SAMPLES,
+        LogMelPettingDetector,
+        StopAndVoteMapper,
+        build_mel_filterbank,
+    )
+
+    # 1. Verify Stop-and-Vote mapper ignores scans while moving and locks keyframe only during stops
+    mapper = StopAndVoteMapper()
+    scan64 = [0.45] * 64
+    for _ in range(20):
+        m_mov = mapper.observe_tick([0.1, 0.0], 0.0, speed_m_s=0.25, gyro_norm_rad_s=0.3, tof_zones64_m=scan64)
+        assert m_mov["committed_keyframe"] is False
+    assert mapper.keyframes == []
+
+    for _ in range(15):
+        mapper.observe_tick([0.2, 0.0], 0.0, speed_m_s=0.0, gyro_norm_rad_s=0.01, tof_zones64_m=scan64)
+    assert len(mapper.keyframes) == 1
+    assert mapper.keyframes[0]["valid_zones"] == 64
+
+    # 2. Verify pinned `pet-detect/src/lib.rs` log-mel contract (`16,240 samples`, `40 x 100 = 4,000 floats`)
+    assert WINDOW_SAMPLES == 16_240
+    assert N_MELS * WINDOW_FRAMES == 4_000
+    filters = build_mel_filterbank()
+    assert len(filters) == 40 and all(len(f) > 0 for f in filters)
+
+    det = LogMelPettingDetector()
+    silence = [0.0] * WINDOW_SAMPLES
+    mel_quiet = det.extract_log_mel(silence)
+    assert len(mel_quiet) == 4_000
+    assert all(abs(v - math.log(LOG_EPS)) < 1e-3 for v in mel_quiet)
+
+    # SoundSentry gate skips quiet windows when not petting
+    res_gated = det.evaluate_window(silence, audible=False)
+    assert res_gated["skipped_by_sentry"] is True and res_gated["is_petting"] is False
+
+
+def test_pillar5_pad_imu_complementary_filter_and_dead_radio_trap():
+    from prehardware_subsystems import CLONE_UNINITIALIZED_Z_DRIFT_DPS, PadImuFilter
+
+    pad = PadImuFilter()
+    # 1. Feed 0.6s of resting Switch Pro clone IMU samples with +12 deg/s uncalibrated Z gyro bias
+    for step in range(35):
+        out = pad.push_sample(
+            accel_g=(0.0, 0.0, 1.0),
+            raw_gyro_dps=(0.1, -0.1, CLONE_UNINITIALIZED_Z_DRIFT_DPS),
+            at_s=step * 0.02,
+            evdev_seq=step + 1,
+        )
+    assert out["calibrated"] is True
+    assert math.isclose(out["bias_dps"][2], CLONE_UNINITIALIZED_Z_DRIFT_DPS, abs_tol=0.2)
+    assert out["dead_radio_trap_detected"] is False
+
+    # 2. Freeze evdev_seq for 14 ticks (280 ms > 250 ms robotd deadman) to trigger dead-radio stale stream trap
+    frozen_seq = 100
+    for step in range(15):
+        out_stale = pad.push_sample(
+            accel_g=(0.0, 0.0, 1.0),
+            raw_gyro_dps=(0.0, 0.0, CLONE_UNINITIALIZED_Z_DRIFT_DPS),
+            at_s=1.0 + step * 0.02,
+            evdev_seq=frozen_seq,
+        )
+    assert out_stale["dead_radio_trap_detected"] is True
+

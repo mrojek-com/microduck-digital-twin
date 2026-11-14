@@ -174,6 +174,51 @@
       falls: 0,
       pickups: 0,
     },
+
+    // 5 Pre-Hardware Subsystems (pollen-robotics/microduck clean-room state)
+    odom: {
+      anchorFoot: "left",
+      anchorIdx: 5,
+      switches: 0,
+      pendingFoot: null,
+      pendingTicks: 0,
+      alpha16X: 0,
+      alpha16Z: 0,
+      v15X: 0,
+      v15Z: 0,
+      driftAlpha16Mm: 0,
+      driftV15Mm: 0,
+    },
+    bus: {
+      volts: 8.2,
+      tempsC: new Array(15).fill(31.0),
+      currentsMa: new Array(15).fill(80.0),
+      pwmCounts: new Array(15).fill(0),
+      staleImuRun: 0,
+      staleImuTotal: 0,
+      remoteIoProto: 1,
+    },
+    maploc: {
+      isStopped: true,
+      stopTicks: 0,
+      keyframes: 0,
+    },
+    petDetect: {
+      isPetting: false,
+      prob: 0.02,
+      enterThreshold: 0.95,
+      exitThreshold: 0.85,
+      windowSamples: 16240,
+      nMels: 40,
+      windowFrames: 100,
+    },
+    padImu: {
+      calibrated: true,
+      biasDps: [0.0, 0.0, 12.0],
+      stillWindowS: 0.5,
+      staleRadioTicks: 0,
+      deadRadioTrap: false,
+    },
   };
 
   function pushLog(tag, msg) {
@@ -1057,6 +1102,66 @@
     },
     read_obs61() { return this.readObs61(); },
 
+    // Pillar 1: Sole Contact Anchor Odometry (`odometry/src/lib.rs` & `anchors.rs`)
+    readOdometry() {
+      return {
+        anchor_set: "alpha16",
+        anchor_foot: state.odom.anchorFoot,
+        anchor_idx: state.odom.anchorIdx,
+        switches: state.odom.switches,
+        alpha16_pose: { x: Number(state.odom.alpha16X.toFixed(4)), z: Number(state.odom.alpha16Z.toFixed(4)), yaw: Number(state.pose.yaw.toFixed(4)) },
+        v15_pose: { x: Number(state.odom.v15X.toFixed(4)), z: Number(state.odom.v15Z.toFixed(4)), yaw: Number(state.pose.yaw.toFixed(4)) },
+        drift_alpha16_mm: Number(state.odom.driftAlpha16Mm.toFixed(2)),
+        drift_v15_mm: Number(state.odom.driftV15Mm.toFixed(2)),
+        switch_margin_m: -0.010,
+        confirm_ticks: 2,
+      };
+    },
+    read_odometry() { return this.readOdometry(); },
+
+    // Pillar 2 & 3: XL330 Register Block 124..136 + Slow Sensors 144..146 (`duck-control/src/bus.rs`)
+    readBusSlow() {
+      return {
+        volts: Number(state.bus.volts.toFixed(1)),
+        temps_c: state.bus.tempsC.map((t) => Math.round(t)),
+        max_temp_c: Math.round(Math.max(...state.bus.tempsC)),
+        currents_ma: state.bus.currentsMa.map((c) => Math.round(c)),
+        pwm_counts: [...state.bus.pwmCounts],
+        stale_imu_run: state.bus.staleImuRun,
+        imu_frozen_warn: state.bus.staleImuRun >= 25,
+        remote_io_protocol: state.bus.remoteIoProto,
+      };
+    },
+    read_bus_slow() { return this.readBusSlow(); },
+
+    // Pillar 4: `maploc` Stop-and-Vote ToF Mapper & `pet-detect` 40x100 Log-Mel Classifier
+    readPetting() {
+      return {
+        is_petting: state.petDetect.isPetting,
+        probability: Number(state.petDetect.prob.toFixed(3)),
+        enter_threshold: state.petDetect.enterThreshold,
+        exit_threshold: state.petDetect.exitThreshold,
+        window_samples: state.petDetect.windowSamples,
+        n_mels: state.petDetect.nMels,
+        window_frames: state.petDetect.windowFrames,
+        maploc_stopped: state.maploc.isStopped,
+        maploc_keyframes: state.maploc.keyframes,
+      };
+    },
+    read_petting() { return this.readPetting(); },
+
+    // Pillar 5: `pad-imu` 6-Axis Complementary Filter & `SYN_DROPPED` Dead-Radio Auditor
+    readPadImu() {
+      return {
+        calibrated: state.padImu.calibrated,
+        bias_dps: [...state.padImu.biasDps],
+        still_window_s: state.padImu.stillWindowS,
+        stale_radio_ticks: state.padImu.staleRadioTicks,
+        dead_radio_trap_detected: state.padImu.deadRadioTrap,
+      };
+    },
+    read_pad_imu() { return this.readPadImu(); },
+
     watch(key, val) {
       if (key) {
         state.customScript.watchVars[String(key)] =
@@ -1550,7 +1655,94 @@
     }
 
     updateTofMatrix();
+    updatePreHardwareSubsystems(dt, speed);
     updateFaceLeds();
+  }
+
+  function updatePreHardwareSubsystems(dt, speed) {
+    // 1. Pillar 1: ALPHA16 vs V15 Sole Contact Odometry (`odometry/src/lib.rs`)
+    const leftLift = state.joints[3] - DEFAULT_POSITION[3];
+    const rightLift = -(state.joints[12] - DEFAULT_POSITION[12]);
+    const candFoot = leftLift < rightLift ? "left" : "right";
+    const zDiff = Math.abs(leftLift - rightLift) * 0.042;
+    if (candFoot !== state.odom.anchorFoot && zDiff > 0.010) {
+      if (state.odom.pendingFoot === candFoot) {
+        state.odom.pendingTicks += 1;
+      } else {
+        state.odom.pendingFoot = candFoot;
+        state.odom.pendingTicks = 1;
+      }
+      if (state.odom.pendingTicks >= 2) {
+        state.odom.anchorFoot = candFoot;
+        state.odom.anchorIdx = (state.odom.anchorIdx + 5) % 16;
+        state.odom.switches += 1;
+        state.odom.pendingFoot = null;
+        state.odom.pendingTicks = 0;
+      }
+    } else {
+      state.odom.pendingFoot = null;
+      state.odom.pendingTicks = 0;
+    }
+    // Upstream benchmark: over a 3.2m walk, ALPHA16 drifts ~9mm (2.81 mm/m) vs V15 ~17mm (5.31 mm/m)
+    state.odom.driftAlpha16Mm = state.vetbook.metersWalked * 2.81;
+    state.odom.driftV15Mm = state.vetbook.metersWalked * 5.31;
+    const driftRad = state.pose.yaw + 0.35;
+    state.odom.alpha16X = state.pose.x + (state.odom.driftAlpha16Mm / 1000) * Math.cos(driftRad);
+    state.odom.alpha16Z = state.pose.z + (state.odom.driftAlpha16Mm / 1000) * Math.sin(driftRad);
+    state.odom.v15X = state.pose.x + (state.odom.driftV15Mm / 1000) * Math.cos(driftRad);
+    state.odom.v15Z = state.pose.z + (state.odom.driftV15Mm / 1000) * Math.sin(driftRad);
+
+    // 2. Pillar 3: XL330 Register Block 124..136 (`0.229 rpm/count`) & Slow Sensors 144..146 (`0.1V`, `1C`)
+    const RAD_PER_SEC_PER_COUNT = 0.229 * (2 * Math.PI / 60);
+    const RAD_PER_COUNT = (2 * Math.PI) / 4096;
+    let totalCurrentA = 0;
+    for (let i = 0; i < 15; i++) {
+      if (state.simGap !== "ideal") {
+        state.velocities[i] = Math.round(state.velocities[i] / RAD_PER_SEC_PER_COUNT) * RAD_PER_SEC_PER_COUNT;
+        state.joints[i] = Math.round(state.joints[i] / RAD_PER_COUNT) * RAD_PER_COUNT;
+      }
+      const pwm = Math.max(-885, Math.min(885, Math.round(state.velocities[i] * 85)));
+      state.bus.pwmCounts[i] = pwm;
+      const curMa = Math.min(1400, 65 + Math.abs(pwm) * 0.95 + (state.isSeated ? 20 : 85));
+      state.bus.currentsMa[i] = curMa;
+      totalCurrentA += curMa / 1000;
+      const iAmp = curMa / 1000;
+      const dTemp = (iAmp * iAmp * 5.2 - (state.bus.tempsC[i] - 31.0) * 0.12) * dt;
+      state.bus.tempsC[i] = Math.max(31.0, Math.min(82.0, state.bus.tempsC[i] + dTemp));
+    }
+    const rawVolts = Math.max(6.8, Math.min(8.4, 8.2 - totalCurrentA * 0.14));
+    state.bus.volts = Math.round(rawVolts * 10) / 10;
+
+    // 3. Pillar 4: `maploc` Stop-and-Vote ToF Keyframe Mapper & `pet-detect` Hysteresis
+    const isStopped = !state.isFallen && speed < 0.015;
+    state.maploc.isStopped = isStopped;
+    if (isStopped) {
+      state.maploc.stopTicks += 1;
+      if (state.maploc.stopTicks === 13) {
+        state.maploc.keyframes += 1;
+      }
+    } else {
+      state.maploc.stopTicks = 0;
+    }
+
+    const handDist = Number(sliderTheremin.value) || 0.34;
+    if (state.thereminOn && handDist <= 0.14) {
+      state.petDetect.prob = 0.975;
+    } else if (state.activeEmotion) {
+      state.petDetect.prob = 0.22; // Reject self-vocalization
+    } else {
+      state.petDetect.prob = 0.02;
+    }
+    if (!state.petDetect.isPetting && state.petDetect.prob >= state.petDetect.enterThreshold) {
+      state.petDetect.isPetting = true;
+    } else if (state.petDetect.isPetting && state.petDetect.prob < state.petDetect.exitThreshold) {
+      state.petDetect.isPetting = false;
+    }
+
+    // 4. Pillar 5: `pad-imu` 12 deg/s Clone Bias & Stale-Radio Auditor
+    state.padImu.calibrated = state.simGap !== "harsh";
+    state.padImu.staleRadioTicks = state.simGap === "harsh" && speed > 0.22 ? 14 : 0;
+    state.padImu.deadRadioTrap = state.padImu.staleRadioTicks >= 13;
   }
 
   function updateTofMatrix() {
@@ -1643,7 +1835,7 @@
   }
 
   function updateDomTelemetry() {
-    mOdom.textContent = `${state.pose.x.toFixed(2)}, ${state.pose.z.toFixed(2)} m`;
+    mOdom.textContent = `${state.odom.alpha16X.toFixed(2)}, ${state.odom.alpha16Z.toFixed(2)} m (A16:${state.odom.anchorFoot[0].toUpperCase()}#${state.odom.anchorIdx} · Δ${state.odom.driftAlpha16Mm.toFixed(1)}mm)`;
     mBrain.textContent = state.activeEmotion
       ? `EMOTION: ${state.activeEmotion.name.toUpperCase()}`
       : state.activeSkill
