@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>MicroDuck — Bipedal Digital Twin</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=0.3.7">
+  <link rel="stylesheet" href="styles.css?v=0.3.8">
   <script src="vendor/three.min.js"></script>
   <script src="vendor/GLTFLoader.js"></script>
   <script src="vendor/OrbitControls.js"></script>
@@ -210,43 +210,66 @@
       </article>
 
       <!-- LIVE MOTION LAB & AI COPILOT CARD -->
-      <article class="card">
+      <article class="card" data-info="subsys-codelab">
         <div class="card-header">
-          <h2>Live Code Lab &amp; AI Motion Copilot</h2>
+          <h2>50 Hz Closed-Loop Code Lab &amp; Sim-to-Real Testbed</h2>
           <span id="code-runner-badge" class="mono-tag">READY (50 Hz)</span>
         </div>
         <p style="font-size:0.75rem; color:var(--muted); margin-bottom:8px;">
-          Paste or write Python / JavaScript kinematic routines, or ask the local LLM. Code executes live on the 15-DOF robot at 50 Hz!
+          Write closed-loop JavaScript or Python (<code>onStep</code> / <code>on_step</code>) with full IMU, ToF, SE(2) target, and 61-D obs access. Press <kbd style="background:#1e293b; padding:1px 5px; border-radius:4px; border:1px solid #334155; font-family:var(--mono); font-size:0.68rem;">⌘/Ctrl+Enter</kbd> to hot-swap live at 50 Hz.
         </p>
 
         <div class="code-editor-wrap">
           <div class="code-editor-toolbar">
-            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
-              <select id="select-code-preset" class="btn" style="padding:4px 8px; font-size:0.75rem; width:auto;" aria-label="Motion Presets">
-                <option value="drunken_sailor" selected>Preset 1: Drunken Sailor Wobble</option>
-                <option value="tof_beatbox">Preset 2: ToF Theremin Beatbox</option>
-                <option value="self_righting">Preset 3: Self-Righting Acrobat</option>
-                <option value="laser_chase">Preset 4: Laser Dot Tracking</option>
-                <option value="python_style">Python: Waddle &amp; Quack</option>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap; flex:1; min-width:0;">
+              <select id="select-code-preset" class="btn" style="padding:4px 8px; font-size:0.74rem; width:auto; max-width:290px;" aria-label="Closed-Loop Controller Presets">
+                <option value="pd_reflex" selected>1. Closed-Loop IMU PD Balance &amp; Push Reflex</option>
+                <option value="laser_servo">2. SE(2) Laser Visual Servoing (Click Floor)</option>
+                <option value="soccer_fsm">3. Autonomous Soccer Striker FSM (Align &amp; Kick)</option>
+                <option value="tof_beatbox">4. VL53L5CX ToF Repulsion &amp; Theremin</option>
+                <option value="python_style">5. Python: Figure-8 Roller Skate CPG Carver</option>
               </select>
-              <button id="btn-load-preset" class="btn btn-cyan" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;" type="button">Load Preset</button>
+              <button id="btn-load-preset" class="btn btn-cyan" style="padding:4px 9px; font-size:0.73rem; white-space:nowrap;" type="button">Load &amp; Run</button>
+              <select id="select-sim-gap" class="btn" data-info="subsys-sim-gap" style="padding:4px 8px; font-size:0.73rem; width:auto;" aria-label="Sim-to-Real Reality Gap">
+                <option value="ideal" selected>Gap: Ideal (0ms · Noiseless)</option>
+                <option value="nominal">Gap: Nominal (+20ms · IMU σ=0.02)</option>
+                <option value="harsh">Gap: Harsh (+40ms · Slew 8.5 rad/s)</option>
+              </select>
             </div>
-            <div style="display:flex; gap:6px;">
-              <button id="btn-run-code" class="btn btn-primary" style="padding:5px 14px; font-weight:600;" type="button">▶ Run Script</button>
-              <button id="btn-stop-code" class="btn" style="padding:5px 12px;" type="button">⏹ Stop</button>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button id="btn-run-code" class="btn btn-primary" style="padding:5px 12px; font-weight:600; white-space:nowrap;" type="button">▶ Run (⌘↵)</button>
+              <button id="btn-stop-code" class="btn" style="padding:5px 10px; white-space:nowrap;" type="button">⏹ Stop</button>
             </div>
           </div>
 
           <div class="ai-prompt-bar">
-            <input id="ai-prompt-input" class="ai-prompt-input" type="text" placeholder="Prompt Local AI (e.g. 'Make the duck waddle and nod with curious chirps')...">
-            <button id="btn-ai-generate" class="btn btn-purple" style="white-space:nowrap; padding:6px 12px; font-size:0.75rem;" type="button">✨ Ask AI</button>
+            <input id="ai-prompt-input" class="ai-prompt-input" type="text" placeholder="Synthesize closed-loop controller (e.g. 'Carve figure-8 on roller skates', 'Chase soccer ball and kick', 'Avoid ToF hand <25cm')...">
+            <button id="btn-ai-generate" class="btn btn-purple" style="white-space:nowrap; padding:6px 12px; font-size:0.75rem;" type="button">✨ Synthesize</button>
           </div>
 
-          <textarea id="code-editor-input" class="code-textarea" spellcheck="false" placeholder="// onStep(t, dt, duck) is called 50 times per second..."></textarea>
+          <textarea id="code-editor-input" class="code-textarea" spellcheck="false" placeholder="// function onStep(t, dt, duck) — executes every 20ms (50 Hz)"></textarea>
+
+          <!-- Live 50 Hz Hardware Contract & Telemetry Watch Strip -->
+          <div id="code-watch-strip" class="code-watch-strip">
+            <span id="cw-budget" class="cw-pill cw-ok">budget: 0.00 ms / 20 ms</span>
+            <span id="cw-contract" class="cw-pill cw-ok">clamps: 0 · slew: OK</span>
+            <span id="cw-assert" class="cw-pill cw-ok">asserts: READY</span>
+            <div id="cw-vars" class="cw-vars">
+              <span class="cw-var-muted">duck.watch(key, val) telemetry appears here live at 50 Hz</span>
+            </div>
+          </div>
 
           <div class="code-status-bar">
-            <span id="code-status-text">Status: Idle (Click 'Run Script' to execute)</span>
-            <span id="code-api-hint">API: duck.setJoint, duck.setMouth, duck.setTwist, duck.readTof</span>
+            <span id="code-status-text">Status: Ready — Select a preset or press ▶ Run (⌘↵)</span>
+            <span id="code-api-hint" class="code-api-chips">
+              <button type="button" class="api-chip" data-snippet="const imu = duck.readImu();" title=" { roll, pitch, yaw, tilt_deg, gyro, is_fallen }">readImu()</button>
+              <button type="button" class="api-chip" data-snippet="const tgt = duck.readTarget();" title=" { pose, laser: {dist, bearing_rad}, ball: {dist, bearing_rad} }">readTarget()</button>
+              <button type="button" class="api-chip" data-snippet="const tof = duck.readTof();" title=" { distance_m, raw_mm, hand_present, min_zone_m }">readTof()</button>
+              <button type="button" class="api-chip" data-snippet="duck.setJointOffset('neck_pitch', 0.15);" title="Add radian offset to DEFAULT_POSITION[i]">setJointOffset()</button>
+              <button type="button" class="api-chip" data-snippet="duck.setTwist(0.22, 0.0);" title="Command forward vx (m/s) &amp; vyaw (rad/s)">setTwist()</button>
+              <button type="button" class="api-chip" data-snippet="duck.watch('metric', val);" title="Stream live key/value to the 50 Hz watch bar">watch()</button>
+              <button type="button" class="api-chip" data-snippet="duck.assert(imu.tilt_deg < 45, 'upright');" title="Verify real-time hardware safety invariant">assert()</button>
+            </span>
           </div>
         </div>
       </article>
@@ -436,6 +459,6 @@
     </div>
   </div>
 
-  <script src="simulator.js?v=0.3.7"></script>
+  <script src="simulator.js?v=0.3.8"></script>
 </body>
 </html>

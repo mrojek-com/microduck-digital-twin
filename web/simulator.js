@@ -134,10 +134,23 @@
     guardLevel: "R",
 
     customJointOverrides: {},
+    customJointOffsets: {},
+    simGap: "ideal", // ideal | nominal | harsh
+    imuDelayedQueue: [],
     customScript: {
       active: false,
       fn: null,
       lastError: null,
+      ticks: 0,
+      execMs: 0,
+      maxExecMs: 0,
+      clampCount: 0,
+      nanCount: 0,
+      slewCount: 0,
+      assertPassed: 0,
+      assertFailed: 0,
+      lastFailedAssert: null,
+      watchVars: {},
     },
 
     activeSkill: null, // { name, elapsed, duration }
@@ -842,45 +855,224 @@
     }
   }
 
+  // Seeded deterministic PRNG for Sim-to-Real Reality Gap noise
+  let gapSeed = 1337;
+  function seededGaussian(sigma) {
+    if (sigma <= 0) return 0;
+    gapSeed = (gapSeed * 1664525 + 1013904223) >>> 0;
+    const u1 = Math.max(1e-7, (gapSeed & 0xfffffff) / 0x10000000);
+    gapSeed = (gapSeed * 1664525 + 1013904223) >>> 0;
+    const u2 = (gapSeed & 0xfffffff) / 0x10000000;
+    return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2) * sigma;
+  }
+
+  function clampWithContract(val, lo, hi) {
+    if (!Number.isFinite(val)) {
+      state.customScript.nanCount += 1;
+      return 0;
+    }
+    if (val < lo) {
+      state.customScript.clampCount += 1;
+      return lo;
+    }
+    if (val > hi) {
+      state.customScript.clampCount += 1;
+      return hi;
+    }
+    return val;
+  }
+
   const duckApi = {
     setJoint(nameOrIdx, rad) {
       let idx = typeof nameOrIdx === "string" ? JOINT_NAMES.indexOf(nameOrIdx) : nameOrIdx;
-      if (idx >= 0 && idx < 15 && Number.isFinite(rad)) {
-        state.customJointOverrides[idx] = Math.max(ACTUATOR_MIN_RAD, Math.min(ACTUATOR_MAX_RAD, rad));
+      if (idx >= 0 && idx < 15) {
+        state.customJointOverrides[idx] = clampWithContract(rad, ACTUATOR_MIN_RAD, ACTUATOR_MAX_RAD);
       }
     },
     set_joint(nameOrIdx, rad) { this.setJoint(nameOrIdx, rad); },
 
-    setMouth(ratio) {
-      if (Number.isFinite(ratio)) {
-        state.cmd.mouthOpen = Math.max(0, Math.min(1, ratio));
-        state.joints[MOUTH_INDEX] = mouthTarget(state.cmd.mouthOpen);
+    setJointOffset(nameOrIdx, deltaRad) {
+      let idx = typeof nameOrIdx === "string" ? JOINT_NAMES.indexOf(nameOrIdx) : nameOrIdx;
+      if (idx >= 0 && idx < 15) {
+        const clamped = clampWithContract(DEFAULT_POSITION[idx] + deltaRad, ACTUATOR_MIN_RAD, ACTUATOR_MAX_RAD);
+        state.customJointOffsets[idx] = clamped - DEFAULT_POSITION[idx];
       }
+    },
+    set_joint_offset(nameOrIdx, deltaRad) { this.setJointOffset(nameOrIdx, deltaRad); },
+
+    setMouth(ratio) {
+      const r = clampWithContract(ratio, 0, 1);
+      state.cmd.mouthOpen = r;
+      state.joints[MOUTH_INDEX] = mouthTarget(r);
+      if (sliderMouth) sliderMouth.value = r;
+      if (valMouth) valMouth.textContent = `${Math.round(r * 100)}%`;
     },
     set_mouth(ratio) { this.setMouth(ratio); },
 
     setHead(yaw, pitch, roll) {
-      if (Number.isFinite(yaw)) state.cmd.headYaw = Math.max(-1.0, Math.min(1.0, yaw));
-      if (Number.isFinite(pitch)) state.cmd.headPitch = Math.max(-0.6, Math.min(0.6, pitch));
-      if (Number.isFinite(roll)) state.cmd.headRoll = Math.max(-0.6, Math.min(0.6, roll));
+      if (yaw !== undefined) {
+        state.cmd.headYaw = clampWithContract(yaw, -1.0, 1.0);
+        if (sliderHeadYaw) sliderHeadYaw.value = state.cmd.headYaw;
+        if (valHeadYaw) valHeadYaw.textContent = `${state.cmd.headYaw.toFixed(2)} rad`;
+      }
+      if (pitch !== undefined) {
+        state.cmd.headPitch = clampWithContract(pitch, -0.6, 0.6);
+        if (sliderHeadPitch) sliderHeadPitch.value = state.cmd.headPitch;
+        if (valHeadPitch) valHeadPitch.textContent = `${state.cmd.headPitch.toFixed(2)} rad`;
+      }
+      if (roll !== undefined) {
+        state.cmd.headRoll = clampWithContract(roll, -0.6, 0.6);
+      }
     },
     set_head(yaw, pitch, roll) { this.setHead(yaw, pitch, roll); },
 
-    setTwist(vx, vyaw) {
-      if (Number.isFinite(vx)) state.cmd.vx = Math.max(-0.35, Math.min(0.45, vx));
-      if (Number.isFinite(vyaw)) state.cmd.vyaw = Math.max(-1.2, Math.min(1.2, vyaw));
+    setTwist(vx, vyaw, vy = 0) {
+      if (vx !== undefined) {
+        state.cmd.vx = clampWithContract(vx, -0.35, 0.45);
+        if (sliderVx) sliderVx.value = state.cmd.vx;
+        if (valVx) valVx.textContent = `${state.cmd.vx.toFixed(2)} m/s`;
+      }
+      if (vyaw !== undefined) {
+        state.cmd.vyaw = clampWithContract(vyaw, -1.2, 1.2);
+        if (sliderVyaw) sliderVyaw.value = state.cmd.vyaw;
+        if (valVyaw) valVyaw.textContent = `${state.cmd.vyaw.toFixed(2)} rad/s`;
+      }
+      if (vy !== undefined) {
+        state.cmd.vy = clampWithContract(vy, -0.25, 0.25);
+        if (sliderVy) sliderVy.value = state.cmd.vy;
+        if (valVy) valVy.textContent = `${state.cmd.vy.toFixed(2)} m/s`;
+      }
     },
-    set_twist(vx, vyaw) { this.setTwist(vx, vyaw); },
+    set_twist(vx, vyaw, vy = 0) { this.setTwist(vx, vyaw, vy); },
+
+    setMode(mode) {
+      if (mode === "walk" || mode === "roller") {
+        if (state.locomotionMode !== mode) {
+          state.locomotionMode = mode;
+          if (mode === "roller") state.rollerSkatesForced = true;
+          updateLocomotionUi();
+        }
+      }
+    },
+    set_mode(mode) { this.setMode(mode); },
+
+    doSkill(name) {
+      if (!state.activeSkill || state.activeSkill.name !== name) {
+        triggerSkill(name);
+      }
+    },
+    do_skill(name) { this.doSkill(name); },
+
+    recover() {
+      if (state.isFallen || state.isResting || state.isSeated) {
+        state.isFallen = false;
+        state.isResting = false;
+        state.isSeated = false;
+        state.pose.pitchFall *= 0.25;
+        state.pose.rollFall *= 0.25;
+        state.impactGuardStates.fill(0);
+        pushLog("robotd", "Closed-loop reflex triggered recovery -> UPRIGHT");
+      }
+    },
+
+    readImu() {
+      const sigma = state.simGap === "harsh" ? 0.055 : (state.simGap === "nominal" ? 0.02 : 0.0);
+      const rawPitch = state.pose.pitchFall + (state.cmd.bodyPitch || 0) + seededGaussian(sigma);
+      const rawRoll = state.pose.rollFall + (state.cmd.bodyRoll || 0) + seededGaussian(sigma);
+      const tiltRad = Math.hypot(rawPitch, rawRoll);
+      const snap = {
+        roll: rawRoll,
+        pitch: rawPitch,
+        yaw: state.pose.yaw,
+        tilt_deg: Number((tiltRad * 180 / Math.PI).toFixed(1)),
+        gyro: [
+          seededGaussian(sigma * 2),
+          state.velocities[2] * 0.25 + seededGaussian(sigma * 2),
+          state.cmd.vyaw + seededGaussian(sigma * 2)
+        ],
+        gravity: [Math.sin(rawPitch), -Math.sin(rawRoll), -Math.cos(tiltRad)],
+        is_fallen: state.isFallen,
+        is_picked_up: state.isPickedUp,
+        guard_profile: state.guardLevel,
+        trips: state.fallTrips,
+      };
+      state.imuDelayedQueue.push(snap);
+      const delayTicks = state.simGap === "harsh" ? 2 : (state.simGap === "nominal" ? 1 : 0);
+      while (state.imuDelayedQueue.length > delayTicks + 1) {
+        state.imuDelayedQueue.shift();
+      }
+      return state.imuDelayedQueue[0] || snap;
+    },
+    read_imu() { return this.readImu(); },
 
     readTof() {
       const d = Number(sliderTheremin.value) || 0.34;
+      const sigma = state.simGap === "harsh" ? 0.015 : (state.simGap === "nominal" ? 0.005 : 0.0);
+      const noisyD = Math.max(0.04, d + seededGaussian(sigma));
       return {
-        distance_m: d,
-        hand_present: d < 0.60,
-        raw_mm: Math.round(d * 1000),
+        distance_m: Number(noisyD.toFixed(3)),
+        min_zone_m: Number(noisyD.toFixed(3)),
+        hand_present: noisyD < 0.60,
+        raw_mm: Math.round(noisyD * 1000),
       };
     },
     read_tof() { return this.readTof(); },
+
+    readTarget() {
+      const wrapAngle = (a) => {
+        while (a > Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
+        return a;
+      };
+      const ldx = state.laser.x - state.pose.x;
+      const ldz = state.laser.z - state.pose.z;
+      const lDist = Math.hypot(ldx, ldz);
+      const lBearing = wrapAngle(Math.atan2(-ldz, ldx) - state.pose.yaw);
+
+      const bdx = state.ball.x - state.pose.x;
+      const bdz = state.ball.z - state.pose.z;
+      const bDist = Math.hypot(bdx, bdz);
+      const bBearing = wrapAngle(Math.atan2(-bdz, bdx) - state.pose.yaw);
+
+      return {
+        pose: { x: Number(state.pose.x.toFixed(3)), z: Number(state.pose.z.toFixed(3)), yaw: Number(state.pose.yaw.toFixed(3)) },
+        laser: { active: state.laser.active, x: state.laser.x, z: state.laser.z, dist: Number(lDist.toFixed(3)), bearing_rad: Number(lBearing.toFixed(3)) },
+        ball: { x: state.ball.x, z: state.ball.z, vx: state.ball.vx, vz: state.ball.vz, dist: Number(bDist.toFixed(3)), bearing_rad: Number(bBearing.toFixed(3)) },
+      };
+    },
+    read_target() { return this.readTarget(); },
+
+    readJoints() {
+      return {
+        names: [...JOINT_NAMES],
+        pos: [...state.joints],
+        vel: [...state.velocities],
+        defaults: [...DEFAULT_POSITION],
+      };
+    },
+    read_joints() { return this.readJoints(); },
+
+    readObs61() {
+      return [...state.obs61];
+    },
+    read_obs61() { return this.readObs61(); },
+
+    watch(key, val) {
+      if (key) {
+        state.customScript.watchVars[String(key)] =
+          typeof val === "number" ? (Number.isInteger(val) ? val : Number(val.toFixed(3))) : String(val);
+      }
+    },
+
+    assert(condition, label = "invariant") {
+      if (condition) {
+        state.customScript.assertPassed += 1;
+      } else {
+        state.customScript.assertFailed += 1;
+        state.customScript.lastFailedAssert = String(label);
+      }
+      return Boolean(condition);
+    },
 
     playQuack(pitchMultiplier = 1.0) {
       playProceduralQuack(pitchMultiplier);
@@ -894,7 +1086,20 @@
 
     reset() {
       state.customJointOverrides = {};
+      state.customJointOffsets = {};
+      state.imuDelayedQueue = [];
+      state.customScript.ticks = 0;
+      state.customScript.execMs = 0;
+      state.customScript.maxExecMs = 0;
+      state.customScript.clampCount = 0;
+      state.customScript.nanCount = 0;
+      state.customScript.slewCount = 0;
+      state.customScript.assertPassed = 0;
+      state.customScript.assertFailed = 0;
+      state.customScript.lastFailedAssert = null;
+      state.customScript.watchVars = {};
       state.cmd.vx = 0;
+      state.cmd.vy = 0;
       state.cmd.vyaw = 0;
       state.cmd.mouthOpen = 0;
     },
@@ -1047,6 +1252,41 @@
       if (Math.abs(state.ball.x) > 2.6) state.ball.vx *= -0.7;
       if (Math.abs(state.ball.z) > 2.6) state.ball.vz *= -0.7;
       ballMesh.position.set(state.ball.x, 0.042, state.ball.z);
+    }
+
+    // Execute 50 Hz Closed-Loop Custom Controller (runs even when fallen/picked-up for reflex recovery)
+    if (state.customScript.active && typeof state.customScript.fn === "function") {
+      state.customJointOverrides = {};
+      state.customJointOffsets = {};
+      const t0 = performance.now();
+      try {
+        const ret = state.customScript.fn(state.time, dt, duckApi);
+        const elapsedMs = performance.now() - t0;
+        state.customScript.ticks += 1;
+        state.customScript.execMs = elapsedMs;
+        if (elapsedMs > state.customScript.maxExecMs) {
+          state.customScript.maxExecMs = elapsedMs;
+        }
+        if (ret && typeof ret === "object") {
+          for (const [k, v] of Object.entries(ret)) {
+            duckApi.watch(k, v);
+          }
+        }
+      } catch (err) {
+        state.customScript.active = false;
+        state.customScript.lastError = err.message;
+        const statusEl = document.getElementById("code-status-text");
+        if (statusEl) {
+          statusEl.textContent = `Runtime Error: ${err.message}`;
+          statusEl.style.color = "var(--rose)";
+        }
+        const badge = document.getElementById("code-runner-badge");
+        if (badge) {
+          badge.textContent = "RUNTIME ERROR";
+          badge.style.color = "var(--rose)";
+        }
+        pushLog("script/err", `Custom controller halted at tick ${state.customScript.ticks}: ${err.message}`);
+      }
     }
 
     // Theremin computation
@@ -1226,46 +1466,30 @@
         }
       }
 
-      // Scatter 14 actions -> 15 joints
+      // Scatter 14 actions + custom offsets/overrides -> 15 joints (with XL330 slew limit under harsh gap)
+      const maxSlewRad = state.simGap === "harsh" ? (8.5 * dt) : (state.simGap === "nominal" ? (14.0 * dt) : Infinity);
       let src = 0;
       for (let i = 0; i < 15; i++) {
+        let desired;
         if (i === MOUTH_INDEX) {
-          const next = mouthTarget(mouthOpen);
-          state.velocities[i] = (next - state.joints[i]) / dt;
-          state.joints[i] = next;
+          desired = mouthTarget(mouthOpen);
         } else {
-          const next = Math.max(-Math.PI, Math.min(Math.PI, DEFAULT_POSITION[i] + action14[src]));
-          state.velocities[i] = (next - state.joints[i]) / dt;
-          state.joints[i] = next;
+          const offset = Number.isFinite(state.customJointOffsets[i]) ? state.customJointOffsets[i] : 0;
+          desired = Math.max(-Math.PI, Math.min(Math.PI, DEFAULT_POSITION[i] + action14[src] + offset));
           src++;
         }
-      }
-
-      // Apply Custom Script Step & Overrides
-      if (state.customScript.active && typeof state.customScript.fn === 'function') {
-        try {
-          state.customScript.fn(state.time, dt, duckApi);
-          for (const [idxStr, val] of Object.entries(state.customJointOverrides)) {
-            const jIdx = Number(idxStr);
-            if (jIdx >= 0 && jIdx < 15 && Number.isFinite(val)) {
-              state.joints[jIdx] = val;
-            }
-          }
-        } catch (err) {
-          state.customScript.active = false;
-          state.customScript.lastError = err.message;
-          const statusEl = document.getElementById("code-status-text");
-          if (statusEl) {
-            statusEl.textContent = `Error: ${err.message}`;
-            statusEl.style.color = "var(--rose)";
-          }
-          const badge = document.getElementById("code-runner-badge");
-          if (badge) {
-            badge.textContent = "ERROR";
-            badge.style.color = "var(--rose)";
-          }
-          pushLog("script/err", `Custom script halted: ${err.message}`);
+        if (Number.isFinite(state.customJointOverrides[i])) {
+          desired = Math.max(-Math.PI, Math.min(Math.PI, state.customJointOverrides[i]));
         }
+        const prev = state.joints[i];
+        let delta = desired - prev;
+        if (Math.abs(delta) > maxSlewRad) {
+          delta = Math.sign(delta) * maxSlewRad;
+          state.customScript.slewCount += 1;
+        }
+        const next = prev + delta;
+        state.velocities[i] = (next - prev) / dt;
+        state.joints[i] = next;
       }
     }
 
@@ -1447,6 +1671,45 @@
       const deg = (state.joints[i] * 180) / Math.PI;
       jointRows[i].ang.textContent = `${deg.toFixed(1)}°`;
       jointRows[i].grd.textContent = String(state.impactGuardStates[i]);
+    }
+
+    // Update 50 Hz Closed-Loop Watch Strip & Hardware Contract
+    const cwBudget = document.getElementById("cw-budget");
+    const cwContract = document.getElementById("cw-contract");
+    const cwAssert = document.getElementById("cw-assert");
+    const cwVars = document.getElementById("cw-vars");
+    if (cwBudget && cwContract && cwAssert && cwVars) {
+      const cs = state.customScript;
+      if (cs.active) {
+        const overBudget = cs.maxExecMs > 4.0;
+        cwBudget.textContent = `exec: ${cs.execMs.toFixed(2)} ms (peak ${cs.maxExecMs.toFixed(2)} ms) · tick #${cs.ticks}`;
+        cwBudget.className = `cw-pill ${overBudget ? "cw-warn" : "cw-ok"}`;
+
+        const hasViolations = cs.clampCount > 0 || cs.nanCount > 0;
+        cwContract.textContent = `clamps: ${cs.clampCount} · NaN: ${cs.nanCount} · slew: ${cs.slewCount}`;
+        cwContract.className = `cw-pill ${cs.nanCount > 0 ? "cw-err" : (hasViolations ? "cw-warn" : "cw-ok")}`;
+
+        if (cs.assertFailed > 0) {
+          cwAssert.textContent = `assert FAIL (${cs.lastFailedAssert}): ${cs.assertFailed}`;
+          cwAssert.className = "cw-pill cw-err";
+        } else if (cs.assertPassed > 0) {
+          cwAssert.textContent = `asserts PASS (${cs.assertPassed})`;
+          cwAssert.className = "cw-pill cw-ok";
+        } else {
+          cwAssert.textContent = "asserts: 0";
+          cwAssert.className = "cw-pill";
+        }
+
+        const entries = Object.entries(cs.watchVars);
+        if (entries.length > 0) {
+          cwVars.innerHTML = entries
+            .slice(0, 8)
+            .map(([k, v]) => `<span class="cw-var"><b>${k}:</b> ${v}</span>`)
+            .join("");
+        } else {
+          cwVars.innerHTML = `<span class="cw-var-muted">Call duck.watch(k, v) or return {k: v} to inspect live state</span>`;
+        }
+      }
     }
 
     drawObsHeatmap();
@@ -1715,78 +1978,181 @@
   });
 
   // ---------------------------------------------------------------------------
-  // 8.5. Live Code Sandbox, Presets & AI Motion Copilot
+  // 8.5. 50 Hz Closed-Loop Code Lab, Sim-to-Real Gap & Compositional Copilot
   // ---------------------------------------------------------------------------
   const CODE_PRESETS = {
-    drunken_sailor: `// Preset 1: Drunken Sailor Wobble (Asymmetric gait & dynamic balance)
-function onStep(t, dt, duck) {
-  const waddleSpeed = 5.2;
-  const phase = t * waddleSpeed;
-  const sway = Math.sin(phase) * 0.22;
-  const stagger = Math.sin(t * 1.3) * 0.15;
-
-  duck.setTwist(0.18 + stagger, sway * 1.4);
-  duck.setHead(Math.sin(t * 2.5) * 0.35, Math.cos(t * 3.1) * 0.18, -sway * 0.8);
-  duck.setJoint('neck_pitch', 0.12 + 0.15 * Math.sin(t * 4.0));
-
-  if (Math.sin(t * 1.8) > 0.85) {
-    duck.setMouth(0.7);
-  } else {
-    duck.setMouth(0.0);
-  }
-}`,
-
-    tof_beatbox: `// Preset 2: ToF Theremin Beatbox (Reactive to hand proximity)
-let lastBeat = 0;
-function onStep(t, dt, duck) {
-  const tof = duck.readTof();
-  if (tof.hand_present) {
-    const proximity = Math.max(0, Math.min(1, 1.0 - (tof.distance_m - 0.08) / (0.60 - 0.08)));
-    duck.setMouth(proximity);
-    duck.setHead(0, (proximity - 0.5) * 0.4, Math.sin(t * 12.0) * proximity * 0.3);
-    duck.setJoint('neck_pitch', 0.2 + 0.25 * Math.sin(t * 8.0));
-
-    if (t - lastBeat > 0.35 && proximity > 0.4) {
-      duck.playQuack(1.0 + proximity * 0.8);
-      lastBeat = t;
-    }
-  } else {
-    duck.setMouth(0.0);
-    duck.setHead(0, 0, 0);
-  }
-}`,
-
-    self_righting: `// Preset 3: Self-Righting Acrobat (Tilt detection & reflex recovery)
+    pd_reflex: `// Preset 1: Closed-Loop IMU PD Balance & Push Reflex
+// Injects periodic 7.5 rad/s push disturbances, applies ankle/hip pitch PD
+// counter-torque via setJointOffset(), and auto-recovers if Level 5 collapses.
 let stepCount = 0;
 function onStep(t, dt, duck) {
   stepCount++;
-  if (stepCount % 250 === 100) {
+  duck.setMode('walk');
+
+  // Periodic external push test every 4.5 seconds (225 ticks)
+  if (stepCount % 225 === 80) {
     duck.applyImpulse(7.5);
   }
-  duck.setJoint('neck_pitch', 0.35 + 0.1 * Math.sin(t * 4));
-  duck.setTwist(0.2, 0);
+
+  const imu = duck.readImu();
+  if (imu.is_fallen) {
+    duck.watch('state', 'RECOVERING');
+    duck.recover();
+    return;
+  }
+
+  // Closed-loop PD ankle & hip stabilization against pitch/roll disturbance
+  const kp = 0.85, kd = 0.08;
+  const pitchCorr = -kp * imu.pitch - kd * imu.gyro[1];
+  const rollCorr  = -kp * imu.roll;
+
+  duck.setJointOffset('left_ankle',  pitchCorr);
+  duck.setJointOffset('right_ankle', -pitchCorr); // mirrored right pitch
+  duck.setJointOffset('left_hip_roll',  rollCorr);
+  duck.setJointOffset('right_hip_roll', rollCorr);
+  duck.setHead(0, -imu.pitch * 0.6, -imu.roll * 0.6); // vestibular gaze lock
+  duck.setTwist(0.16, 0.0);
+
+  duck.assert(imu.tilt_deg < 48.0, 'tilt<48deg');
+  return {
+    state: imu.tilt_deg > 8 ? 'STABILIZING' : 'NOMINAL',
+    tilt_deg: imu.tilt_deg,
+    ankle_pd: pitchCorr
+  };
 }`,
 
-    laser_chase: `// Preset 4: Laser Dot Tracking
+    laser_servo: `// Preset 2: Closed-Loop SE(2) Laser Dot Visual Servoing
+// Click anywhere on the 3D floor grid to move the red laser target!
+let integralYaw = 0;
+let arrivedQuack = false;
 function onStep(t, dt, duck) {
-  duck.setHead(Math.sin(t * 3.0) * 0.45, 0.25, 0.0);
-  duck.setJoint('neck_pitch', 0.35);
-  duck.setTwist(0.25, Math.sin(t * 2.0) * 0.5);
-  duck.setMouth(Math.sin(t * 6.0) > 0.6 ? 0.6 : 0.0);
+  const tgt = duck.readTarget().laser;
+  const errYaw = tgt.bearing_rad;
+  const dist = tgt.dist;
+
+  integralYaw = Math.max(-0.4, Math.min(0.4, integralYaw + errYaw * dt));
+
+  // Foveate head gaze onto the floor laser dot
+  duck.setHead(errYaw * 0.75, Math.min(0.45, 0.18 + 0.15 / Math.max(0.2, dist)), 0);
+  duck.setJointOffset('neck_pitch', 0.22);
+
+  if (dist > 0.14) {
+    arrivedQuack = false;
+    const vx = Math.min(0.32, dist * 0.55) * Math.max(0.15, Math.cos(errYaw));
+    const vyaw = 1.45 * errYaw + 0.25 * integralYaw;
+    duck.setTwist(vx, vyaw);
+    duck.setMouth(0.0);
+  } else {
+    duck.setTwist(0.0, 0.0);
+    duck.setMouth(0.75);
+    if (!arrivedQuack) {
+      duck.playQuack(1.22);
+      arrivedQuack = true;
+    }
+  }
+
+  duck.assert(Number.isFinite(dist), 'valid_se2_target');
+  return {
+    servo: dist > 0.14 ? 'PURSUIT' : 'LOCKED_ON',
+    dist_m: dist,
+    bearing_rad: errYaw
+  };
 }`,
 
-    python_style: `# Python-style Kinematics Routine
+    soccer_fsm: `// Preset 3: Autonomous Soccer Striker FSM (Search -> Align -> Strike)
+let kickCooldown = 0;
+function onStep(t, dt, duck) {
+  if (kickCooldown > 0) kickCooldown -= dt;
+  const ball = duck.readTarget().ball;
+  const err = ball.bearing_rad;
+  const dist = ball.dist;
+
+  // Track the soccer ball with neck & head
+  duck.setHead(err * 0.8, 0.30, 0);
+  duck.setJointOffset('neck_pitch', 0.25);
+
+  let fsm = 'APPROACH';
+  if (dist < 0.23 && Math.abs(err) < 0.38 && kickCooldown <= 0) {
+    fsm = 'STRIKE';
+    duck.setTwist(0, 0);
+    duck.doSkill(err >= 0 ? 'kick_left' : 'kick_right');
+    duck.playQuack(1.15);
+    kickCooldown = 1.6;
+  } else if (Math.abs(err) > 0.65) {
+    fsm = 'ALIGN_HEADING';
+    duck.setTwist(0.06, err * 1.5);
+  } else {
+    fsm = 'DRIBBLE_APPROACH';
+    duck.setTwist(Math.min(0.30, dist * 0.65), err * 1.35);
+  }
+
+  duck.assert(dist < 5.0, 'ball_in_arena');
+  return { fsm, ball_dist: dist, bearing: err };
+}`,
+
+    tof_beatbox: `// Preset 4: VL53L5CX 8x8 ToF Proximity Avoidance & Theremin Beatbox
+// Move the 'Hand Distance' slider on the right column (< 0.22m triggers back-off!)
+let lastChirp = 0;
+function onStep(t, dt, duck) {
+  const tof = duck.readTof();
+  const d = tof.distance_m;
+
+  if (d < 0.22) {
+    // Reflexive collision avoidance: back away & open beak in surprise
+    const urgency = (0.22 - d) / 0.14;
+    duck.setTwist(-0.22 * Math.min(1, urgency), 0.35 * Math.sin(t * 6.0));
+    duck.setHead(0, -0.25, 0.25 * Math.sin(t * 10.0));
+    duck.setMouth(0.9);
+    if (t - lastChirp > 0.32) {
+      duck.playQuack(1.45);
+      lastChirp = t;
+    }
+    duck.assert(d >= 0.04, 'tof_min_range');
+    return { zone: 'REPULSION_BACKOFF', tof_mm: tof.raw_mm, vx: -0.22 };
+  } else if (tof.hand_present) {
+    // Theremin groove tracking
+    const prox = (0.60 - d) / 0.38;
+    duck.setTwist(0.0, Math.sin(t * 4.0) * 0.35);
+    duck.setHead(Math.sin(t * 5.0) * 0.25, (prox - 0.5) * 0.35, 0);
+    duck.setMouth(prox * 0.8);
+    if (t - lastChirp > 0.45 && prox > 0.35) {
+      duck.playQuack(0.95 + prox * 0.55);
+      lastChirp = t;
+    }
+    return { zone: 'THEREMIN_LOCK', tof_mm: tof.raw_mm, pitch_mod: prox };
+  }
+
+  duck.setTwist(0.0, 0.0);
+  duck.setMouth(0.0);
+  return { zone: 'CLEAR_IDLE', tof_mm: tof.raw_mm };
+}`,
+
+    python_style: `# Preset 5 (Python): Figure-8 Roller Skate CPG Carver
+# Indentation-aware Python transpiled live to 50 Hz WebGL!
 def on_step(t, dt, duck):
-    # Waddle with animated head bob & beak chirps
-    phase = t * 6.0
-    duck.set_twist(0.22, math.sin(phase) * 0.45)
-    duck.set_head(math.sin(t * 2.5) * 0.35, 0.2, 0.0)
-    duck.set_mouth(abs(math.sin(t * 4.0)) * 0.8)
-    duck.set_joint("neck_pitch", 0.25 + 0.15 * math.sin(phase))`
+    duck.set_mode("roller")
+    imu = duck.read_imu()
+    phase = t * 1.1
+    vyaw = math.sin(phase) * 0.85
+    carve_lean = -vyaw * 0.16
+
+    if imu.is_fallen:
+        duck.recover()
+        duck.watch("gait", "RECOVER")
+    else:
+        duck.set_twist(0.28, vyaw)
+        duck.set_joint_offset("left_hip_roll", carve_lean)
+        duck.set_joint_offset("right_hip_roll", carve_lean)
+        duck.set_head(vyaw * 0.45, 0.18, carve_lean * 1.2)
+        duck.set_mouth(abs(math.sin(t * 3.0)) * 0.45)
+        duck.watch("gait", "FIGURE8_SKATE")
+        duck.watch("vyaw", vyaw)
+        duck.assert(imu.tilt_deg < 45.0, "carve_stability")`
   };
 
   const codeEditorInput = document.getElementById("code-editor-input");
   const selectCodePreset = document.getElementById("select-code-preset");
+  const selectSimGap = document.getElementById("select-sim-gap");
   const btnLoadPreset = document.getElementById("btn-load-preset");
   const btnRunCode = document.getElementById("btn-run-code");
   const btnStopCode = document.getElementById("btn-stop-code");
@@ -1795,26 +2161,78 @@ def on_step(t, dt, duck):
   const btnAiGenerate = document.getElementById("btn-ai-generate");
   const aiPromptInput = document.getElementById("ai-prompt-input");
 
+  // Indentation-aware Python-to-JS transpiler supporting def, if/elif/else, and math/duck idioms
   function transpilePythonToJs(rawCode) {
-    if (!rawCode.includes("def on_step") && !rawCode.includes("def onStep")) {
+    if (!/^\s*def\s+(?:on_step|onStep)\s*\(/m.test(rawCode)) {
       return rawCode;
     }
-    let js = rawCode
-      .replace(/#.*$/gm, "")
-      .replace(/def\s+(?:on_step|onStep)\s*\([^)]*\)\s*:/g, "function onStep(t, dt, duck) {")
+    const lines = rawCode.split(/\r?\n/);
+    const out = [];
+    const indentStack = [0];
+
+    const replaceExpr = (expr) => expr
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/\bNone\b/g, "null")
+      .replace(/\band\b/g, "&&")
+      .replace(/\bor\b/g, "||")
+      .replace(/\bnot\s+/g, "!")
       .replace(/math\.sin/g, "Math.sin")
       .replace(/math\.cos/g, "Math.cos")
+      .replace(/math\.tan/g, "Math.tan")
+      .replace(/math\.hypot/g, "Math.hypot")
       .replace(/math\.abs/g, "Math.abs")
       .replace(/math\.pi/g, "Math.PI")
-      .replace(/abs\(/g, "Math.abs(")
-      .replace(/duck\.set_joint\(/g, "duck.setJoint(")
-      .replace(/duck\.set_mouth\(/g, "duck.setMouth(")
-      .replace(/duck\.set_twist\(/g, "duck.setTwist(")
-      .replace(/duck\.set_head\(/g, "duck.setHead(")
-      .replace(/duck\.read_tof\(/g, "duck.readTof(")
-      .replace(/duck\.play_quack\(/g, "duck.playQuack(");
-    js += "\n}";
-    return js;
+      .replace(/(^|[^.\w])abs\(/g, "$1Math.abs(")
+      .replace(/(^|[^.\w])min\(/g, "$1Math.min(")
+      .replace(/(^|[^.\w])max\(/g, "$1Math.max(");
+
+    for (let rawLine of lines) {
+      const strippedComment = rawLine.replace(/#.*$/, "");
+      if (!strippedComment.trim()) continue;
+      const indent = strippedComment.match(/^\s*/)[0].length;
+      const trimmed = strippedComment.trim();
+
+      while (indentStack.length > 1 && indent < indentStack[indentStack.length - 1]) {
+        indentStack.pop();
+        out.push(" ".repeat(indentStack[indentStack.length - 1]) + "}");
+      }
+
+      if (/^def\s+(?:on_step|onStep)\s*\(([^)]*)\)\s*:$/.test(trimmed)) {
+        const args = trimmed.match(/^def\s+(?:on_step|onStep)\s*\(([^)]*)\)\s*:$/)[1];
+        out.push(`function onStep(${args}) {`);
+        indentStack.push(indent + 4);
+      } else if (/^elif\s+(.+):$/.test(trimmed)) {
+        const cond = replaceExpr(trimmed.match(/^elif\s+(.+):$/)[1]);
+        if (out.length && out[out.length - 1].trim() === "}") {
+          out.pop();
+        }
+        out.push(`${" ".repeat(indent)}} else if (${cond}) {`);
+        indentStack.push(indent + 4);
+      } else if (/^else\s*:$/.test(trimmed)) {
+        if (out.length && out[out.length - 1].trim() === "}") {
+          out.pop();
+        }
+        out.push(`${" ".repeat(indent)}} else {`);
+        indentStack.push(indent + 4);
+      } else if (/^if\s+(.+):$/.test(trimmed)) {
+        const cond = replaceExpr(trimmed.match(/^if\s+(.+):$/)[1]);
+        out.push(`${" ".repeat(indent)}if (${cond}) {`);
+        indentStack.push(indent + 4);
+      } else {
+        let stmt = replaceExpr(trimmed);
+        if (/^[a-zA-Z_]\w*\s*=\s*[^=]/.test(stmt) && !/^(let|const|var)\b/.test(stmt)) {
+          stmt = "let " + stmt;
+        }
+        out.push(" ".repeat(indent) + stmt + ";");
+      }
+    }
+
+    while (indentStack.length > 1) {
+      indentStack.pop();
+      out.push("}");
+    }
+    return out.join("\n");
   }
 
   function compileAndRunUserScript(rawCode) {
@@ -1830,16 +2248,18 @@ def on_step(t, dt, duck):
       `);
       const stepFn = factory(duckApi, console, Math);
       if (typeof stepFn !== "function") {
-        throw new Error("No 'function onStep(t, dt, duck)' or 'def on_step(t, dt, duck):' found.");
+        throw new Error("Define 'function onStep(t, dt, duck)' (JS) or 'def on_step(t, dt, duck):' (Python).");
       }
 
       state.customScript.fn = stepFn;
       state.customScript.active = true;
       state.customScript.lastError = null;
+      state.brainMode = "manual"; // Prevent autonomous brain from fighting custom script
 
       if (codeStatusText) {
-        codeStatusText.textContent = "Status: Running at 50 Hz on MicroDuck 15-DOF rig";
+        codeStatusText.textContent = `Status: Executing closed-loop at 50 Hz (Gap: ${state.simGap.toUpperCase()})`;
         codeStatusText.className = "status-live";
+        codeStatusText.style.color = "var(--emerald)";
       }
       if (codeRunnerBadge) {
         codeRunnerBadge.textContent = "LIVE 50 Hz";
@@ -1847,7 +2267,7 @@ def on_step(t, dt, duck):
         codeRunnerBadge.style.color = "var(--emerald)";
         codeRunnerBadge.style.borderColor = "var(--emerald)";
       }
-      pushLog("script/run", "Custom motion script started (50 Hz).");
+      pushLog("script/run", `50 Hz controller active (Reality gap: ${state.simGap}).`);
     } catch (err) {
       state.customScript.active = false;
       state.customScript.fn = null;
@@ -1856,29 +2276,122 @@ def on_step(t, dt, duck):
       if (codeStatusText) {
         codeStatusText.textContent = `Compile Error: ${err.message}`;
         codeStatusText.className = "status-error";
+        codeStatusText.style.color = "var(--rose)";
       }
       if (codeRunnerBadge) {
         codeRunnerBadge.textContent = "SYNTAX ERROR";
         codeRunnerBadge.style.color = "var(--rose)";
       }
-      pushLog("script/err", `Script compilation failed: ${err.message}`);
+      pushLog("script/err", `Compilation failed: ${err.message}`);
     }
   }
 
-  if (codeEditorInput) {
-    codeEditorInput.value = CODE_PRESETS.drunken_sailor;
+  // Compositional Intent-Aware Controller Synthesizer (Offline / Instant Fallback)
+  function synthesizeCompositionalController(promptText) {
+    const p = promptText.toLowerCase();
+    const wantsRoller = /roller|skate|glide|carve|wheel/.test(p);
+    const wantsFigure8 = /figure[- ]?8|slalom|s-curve|weave/.test(p);
+    const wantsCircle = /circle|orbit|spin|turn/.test(p);
+    const wantsBackward = /back|moonwalk|reverse|retreat/.test(p);
+    const wantsSoccer = /ball|soccer|kick|goal|dribble/.test(p);
+    const wantsLaser = /laser|dot|chase|follow|target/.test(p);
+    const wantsTof = /tof|hand|theremin|avoid|obstacle|proximity/.test(p);
+    const wantsBow = /bow|greet|polite|nod/.test(p);
+    const wantsFlamingo = /flamingo|one leg|balance|single/.test(p);
+
+    if (wantsSoccer) return CODE_PRESETS.soccer_fsm;
+    if (wantsLaser) return CODE_PRESETS.laser_servo;
+    if (wantsTof) return CODE_PRESETS.tof_beatbox;
+
+    const modeStr = wantsRoller ? "roller" : "walk";
+    const baseVx = wantsBackward ? -0.20 : (wantsRoller ? 0.30 : 0.22);
+    const yawExpr = wantsFigure8
+      ? "Math.sin(t * 1.2) * 0.85"
+      : (wantsCircle ? "0.65" : "Math.sin(t * 2.4) * 0.35");
+    const skillHook = wantsBow
+      ? "if (Math.floor(t * 10) % 60 === 15) duck.doSkill('polite_bow');"
+      : (wantsFlamingo ? "if (Math.floor(t * 10) % 70 === 15) duck.doSkill('flamingo');" : "");
+
+    return `// Synthesized Closed-Loop Controller: "${promptText.replace(/"/g, "'")}"
+function onStep(t, dt, duck) {
+  duck.setMode('${modeStr}');
+  const imu = duck.readImu();
+  if (imu.is_fallen) {
+    duck.recover();
+    return { status: 'RECOVERING', tilt: imu.tilt_deg };
+  }
+  ${skillHook}
+  const vx = ${baseVx};
+  const vyaw = ${yawExpr};
+  const pitchCorr = -0.75 * imu.pitch;
+
+  duck.setTwist(vx, vyaw);
+  duck.setJointOffset('left_ankle', pitchCorr);
+  duck.setJointOffset('right_ankle', -pitchCorr);
+  duck.setHead(vyaw * 0.45, 0.18 + 0.12 * Math.sin(t * 4.0), -imu.roll * 0.6);
+  duck.setMouth(Math.sin(t * 5.0) > 0.7 ? 0.65 : 0.0);
+
+  duck.assert(imu.tilt_deg < 45.0, 'stability_margin');
+  return { mode: '${modeStr.toUpperCase()}', vx, vyaw, tilt_deg: imu.tilt_deg };
+}`;
   }
 
-  if (btnLoadPreset && selectCodePreset && codeEditorInput) {
-    btnLoadPreset.addEventListener("click", () => {
-      const key = selectCodePreset.value;
-      if (CODE_PRESETS[key]) {
-        codeEditorInput.value = CODE_PRESETS[key];
+  if (codeEditorInput) {
+    codeEditorInput.value = CODE_PRESETS.pd_reflex;
+    // Support Cmd/Ctrl+Enter to hot-swap code & Tab for 2-space indentation
+    codeEditorInput.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
         compileAndRunUserScript(codeEditorInput.value);
-        pushLog("preset", `Loaded motion preset: ${key}`);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        const start = codeEditorInput.selectionStart;
+        const end = codeEditorInput.selectionEnd;
+        codeEditorInput.value = codeEditorInput.value.substring(0, start) + "  " + codeEditorInput.value.substring(end);
+        codeEditorInput.selectionStart = codeEditorInput.selectionEnd = start + 2;
       }
     });
   }
+
+  if (selectCodePreset && codeEditorInput) {
+    const loadSelectedPreset = () => {
+      const key = selectCodePreset.value;
+      if (CODE_PRESETS[key]) {
+        codeEditorInput.value = CODE_PRESETS[key];
+        if (key === "laser_servo" && !state.laser.active) {
+          state.laser.active = true;
+          laserDotMesh.visible = true;
+        }
+        compileAndRunUserScript(codeEditorInput.value);
+        pushLog("preset", `Loaded & started closed-loop preset: ${key}`);
+      }
+    };
+    selectCodePreset.addEventListener("change", loadSelectedPreset);
+    if (btnLoadPreset) btnLoadPreset.addEventListener("click", loadSelectedPreset);
+  }
+
+  if (selectSimGap) {
+    selectSimGap.addEventListener("change", () => {
+      state.simGap = selectSimGap.value;
+      state.imuDelayedQueue = [];
+      pushLog("sim-gap", `Reality gap profile -> ${state.simGap.toUpperCase()}`);
+      if (state.customScript.active && codeStatusText) {
+        codeStatusText.textContent = `Status: Executing closed-loop at 50 Hz (Gap: ${state.simGap.toUpperCase()})`;
+      }
+    });
+  }
+
+  // Clickable API snippet chips insert code at cursor
+  document.querySelectorAll(".api-chip[data-snippet]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      if (!codeEditorInput) return;
+      const snippet = chip.getAttribute("data-snippet");
+      const pos = codeEditorInput.selectionStart || codeEditorInput.value.length;
+      codeEditorInput.value =
+        codeEditorInput.value.slice(0, pos) + "\n  " + snippet + codeEditorInput.value.slice(pos);
+      codeEditorInput.focus();
+    });
+  });
 
   if (btnRunCode && codeEditorInput) {
     btnRunCode.addEventListener("click", () => {
@@ -1891,28 +2404,31 @@ def on_step(t, dt, duck):
       state.customScript.active = false;
       duckApi.reset();
       if (codeStatusText) {
-        codeStatusText.textContent = "Status: Stopped (Returned to policy control)";
+        codeStatusText.textContent = "Status: Stopped (Returned to manual / policy control)";
         codeStatusText.className = "";
+        codeStatusText.style.color = "";
       }
       if (codeRunnerBadge) {
         codeRunnerBadge.textContent = "STANDBY";
         codeRunnerBadge.style.color = "var(--cyan)";
       }
-      pushLog("script/stop", "Custom script stopped. Returned to default policy control.");
+      pushLog("script/stop", "Custom controller stopped. Returned to policy control.");
     });
   }
 
   if (btnAiGenerate && aiPromptInput && codeEditorInput) {
-    btnAiGenerate.addEventListener("click", async () => {
+    const runSynthesize = async () => {
       const promptText = aiPromptInput.value.trim();
       if (!promptText) return;
 
       btnAiGenerate.disabled = true;
-      btnAiGenerate.textContent = "⏳ Generating...";
-      if (codeStatusText) codeStatusText.textContent = "Connecting to local LLM / AI Copilot...";
+      btnAiGenerate.textContent = "⏳ Synthesizing...";
+      if (codeStatusText) codeStatusText.textContent = "Synthesizing 50 Hz closed-loop controller...";
 
       try {
-        const sysPrompt = "You are an autonomous robotics motion engineer for the 15-DOF MicroDuck bipedal robot. Write ONLY an executable JavaScript function 'function onStep(t, dt, duck)' using the duck API: duck.setTwist(vx, vyaw), duck.setMouth(0..1), duck.setHead(yaw, pitch, roll), duck.setJoint(name, rad), duck.readTof(), duck.playQuack(). Do not include markdown code fences or explanations.";
+        const sysPrompt = "You are an autonomous robotics control engineer for the 15-DOF MicroDuck bipedal robot. Write ONLY an executable JavaScript function 'function onStep(t, dt, duck)' using: duck.readImu(), duck.readTarget(), duck.readTof(), duck.setTwist(vx, vyaw), duck.setJointOffset(name, rad), duck.setHead(yaw, pitch, roll), duck.setMouth(0..1), duck.setMode('walk'|'roller'), duck.recover(), duck.assert(cond, label), and return a telemetry object { ... }. No markdown code fences.";
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3500);
         const resp = await fetch("http://127.0.0.1:11434/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1922,7 +2438,9 @@ def on_step(t, dt, duck):
             stream: false,
             keep_alive: 0,
           }),
+          signal: ctrl.signal,
         });
+        clearTimeout(timer);
 
         if (resp.ok) {
           const data = await resp.json();
@@ -1930,35 +2448,39 @@ def on_step(t, dt, duck):
           if (generated.includes("function onStep") || generated.includes("def on_step")) {
             codeEditorInput.value = generated;
             compileAndRunUserScript(generated);
-            pushLog("AI", `Qwen 3 MoE generated routine for: "${promptText}"`);
+            pushLog("AI", `Qwen 3 MoE synthesized closed-loop controller for: "${promptText}"`);
             return;
           }
         }
-        throw new Error("Local Ollama endpoint unavailable");
+        throw new Error("Fallback to compositional synthesizer");
       } catch (e) {
-        // Fallback procedural AI synthesizer
-        const generated = `// AI Copilot Synthesis: "${promptText}"
-function onStep(t, dt, duck) {
-  // Wave neck and head in harmonic rhythm
-  const harmonic = Math.sin(t * 4.5);
-  duck.setHead(harmonic * 0.4, 0.25, Math.cos(t * 3.2) * 0.2);
-  duck.setJoint('neck_pitch', 0.25 + 0.18 * Math.sin(t * 6.0));
-  duck.setTwist(0.20, harmonic * 0.6);
-  duck.setMouth(harmonic > 0.5 ? 0.8 : 0.0);
-}`;
+        const generated = synthesizeCompositionalController(promptText);
         codeEditorInput.value = generated;
         compileAndRunUserScript(generated);
-        pushLog("AI", `Synthesized motion routine for: "${promptText}"`);
+        pushLog("AI", `Synthesized closed-loop controller for: "${promptText}"`);
       } finally {
         btnAiGenerate.disabled = false;
-        btnAiGenerate.textContent = "✨ Ask AI";
+        btnAiGenerate.textContent = "✨ Synthesize";
+      }
+    };
+    btnAiGenerate.addEventListener("click", runSynthesize);
+    aiPromptInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        runSynthesize();
       }
     });
   }
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (guarded so typing in TEXTAREA/INPUT/SELECT never hijacks keys or Spacebar!)
+  function isEditableTarget(el) {
+    if (!el || !el.tagName) return false;
+    const tag = el.tagName.toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || Boolean(el.isContentEditable);
+  }
+
   window.addEventListener("keydown", (e) => {
-    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    if (isEditableTarget(e.target)) return;
     const k = e.key.toLowerCase();
     if (k === "m") toggleMeshMode();
     if (k === "w" || e.key === "ArrowUp") state.cmd.vx = 0.30;
@@ -1971,6 +2493,7 @@ function onStep(t, dt, duck) {
     }
   });
   window.addEventListener("keyup", (e) => {
+    if (isEditableTarget(e.target)) return;
     const k = e.key.toLowerCase();
     if (["w", "s", "arrowup", "arrowdown"].includes(k)) state.cmd.vx = 0;
     if (["a", "d", "arrowleft", "arrowright"].includes(k)) state.cmd.vyaw = 0;
@@ -2254,9 +2777,16 @@ function onStep(t, dt, duck) {
     "subsys-codelab": {
       badge: "50 HZ REPL",
       tone: "cyan",
-      title: "Live Code Lab & AI Motion Copilot",
-      text: "Execute custom JavaScript or Python-style kinematic routines at 50 Hz directly in the browser, or prompt the local LLM to generate new behaviors.",
-      facts: ["50 Hz onStep()", "duck.* API", "Local AI Copilot"]
+      title: "50 Hz Closed-Loop Code Lab & Sim-to-Real Testbed",
+      text: "Execute closed-loop JS or Python controllers with IMU, SE(2) target, ToF, 61-D obs, execution budget profiling, and real-time hardware assertions.",
+      facts: ["50 Hz onStep()", "Cmd/Ctrl+Enter", "Live Watch Strip"]
+    },
+    "subsys-sim-gap": {
+      badge: "SIM-TO-REAL",
+      tone: "amber",
+      title: "Reality-Gap Non-Ideality Injector",
+      text: "Stress-tests custom controllers against seeded IMU Gaussian noise (σ up to 0.055 rad), 1–2 tick observation delay, and XL330 8.5 rad/s slew-rate limiting.",
+      facts: ["1-2 Tick Latency", "IMU Noise σ", "8.5 rad/s Slew Cap"]
     }
   };
 

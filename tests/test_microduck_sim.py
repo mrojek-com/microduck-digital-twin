@@ -246,3 +246,23 @@ def test_claude_endgegner_adversarial_nan_guards():
             assert False, f"Expected ValueError for dt={bad_dt}"
         except ValueError:
             pass
+
+
+def test_closed_loop_codelab_and_sim_gap_invariants():
+    sim_js = (PROJECT_ROOT / "web" / "simulator.js").read_text(encoding="utf-8")
+    index_html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+
+    # 1. Verify TEXTAREA keyboard guard prevents spacebar/WASD hijacking in code editor
+    assert "isEditableTarget" in sim_js
+    assert 'tag === "TEXTAREA"' in sim_js
+
+    # 2. Verify all 5 closed-loop presets & compositional synthesizer exist
+    for preset_key in ("pd_reflex", "laser_servo", "soccer_fsm", "tof_beatbox", "python_style"):
+        assert f"{preset_key}:" in sim_js
+        assert f'value="{preset_key}"' in index_html
+
+    # 3. Verify ground-truth closed-loop API & Sim-to-Real Reality Gap hooks
+    for api_fn in ("readImu()", "readTarget()", "readTof()", "setJointOffset(", "recover()", "watch(", "assert("):
+        assert api_fn in sim_js
+    assert "select-sim-gap" in index_html
+    assert "code-watch-strip" in index_html
