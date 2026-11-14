@@ -1763,23 +1763,26 @@
       case "polite_bow": {
         const cush = pulse(0.0, 0.2, 0.8, 1.0, p);
         const bow = pulse(0.15, 0.45, 0.62, 0.9, p);
-        // Flat-sole crouch: dh = +c, dk = +2*c, da = dk - dh = +c
-        bothLegs(0.12 * cush, 0.24 * cush, 0.12 * cush);
-        pose.liftY = -0.008 * cush;
-        a[5] = 0.7 * bow;
-        a[6] = 0.45 * bow;
+        // Respect flat-sole invariant (da = dk - dh) while bowing torso & neck forward
+        bothLegs(-0.10 * cush, 0.20 * cush, 0.30 * cush);
+        pose.liftY = -0.012 * cush;
+        pose.pitchFall = 0.22 * bow; // Forward torso bow
+        a[5] = -0.65 * bow;         // Neck dips forward-down (negative = forward)
+        a[6] = -0.35 * bow;         // Head nods politely
         cmd.mouthOpen = 0.25 * pulse(0.4, 0.5, 0.6, 0.75, p);
         break;
       }
       case "ground_pick": {
-        const squat = pulse(0.0, 0.3, 0.7, 1.0, p);
-        const neck = pulse(0.2, 0.45, 0.7, 0.92, p);
-        pose.liftY = -0.025 * squat;
-        // Flat-sole squat: dh = +0.42*squat, dk = +0.84*squat, da = dk - dh = +0.42*squat
-        bothLegs(0.42 * squat, 0.84 * squat, 0.42 * squat);
-        a[5] = 0.9 * neck;
-        a[6] = 0.5 * neck;
-        cmd.mouthOpen = ss(0.46, 0.5, p) * (1 - ss(0.5, 0.56, p));
+        const squat = pulse(0.0, 0.28, 0.68, 1.0, p);
+        const peck = pulse(0.18, 0.42, 0.65, 0.90, p);
+        pose.liftY = -0.040 * squat;
+        pose.pitchFall = 0.32 * peck; // Torso leans forward toward floor
+        // Hip flex forward (-0.26), knee bend (+0.52), ankle trim (+0.78 keeps soles 100% flat)
+        bothLegs(-0.26 * squat, 0.52 * squat, 0.78 * squat);
+        a[5] = -0.92 * peck; // Neck dips forward-down toward floor (negative = forward)
+        a[6] = -0.48 * peck; // Head angles down so beak points straight at target on floor
+        // Open beak on approach (phase 0.2..0.45), snap shut on ground scoop (phase 0.45..0.58)
+        cmd.mouthOpen = ss(0.20, 0.40, p) * (1 - ss(0.46, 0.58, p));
         break;
       }
       case "roulade": {
@@ -2011,10 +2014,12 @@
 
       // Active one-shot skill overlay (Claude Endgegner Physics-Grounded Kinematics)
       if (state.activeSkill) {
-        state.activeSkill.elapsed += dt;
+        if (!state.activeSkill.frozen) {
+          state.activeSkill.elapsed += dt;
+        }
         const p = Math.min(1, state.activeSkill.elapsed / state.activeSkill.duration);
         applySkillAnimation(state.activeSkill.name, p, action14, state);
-        if (p >= 1) {
+        if (!state.activeSkill.frozen && p >= 1) {
           state.pose.pitchFall = 0;
           state.pose.rollFall = 0;
           state.pose.liftY = 0;
@@ -3693,7 +3698,7 @@ function onStep(t, dt, duck) {
   setupSubsystemInspector();
   updateLocomotionUi();
 
-  // Optional URL query-param boot hooks for Dev & QA testing (`?mode=roller&vx=0.35&mouth=1.0&skill=roller_crouch`)
+  // Optional URL query-param boot hooks for Dev & QA testing (`?mode=roller&vx=0.35&mouth=1.0&skill=roller_crouch&skill_phase=0.5`)
   try {
     const qp = new URLSearchParams(window.location.search);
     if (qp.get("mode") === "roller") {
@@ -3702,7 +3707,13 @@ function onStep(t, dt, duck) {
     }
     if (qp.has("vx")) state.cmd.vx = Number(qp.get("vx")) || 0;
     if (qp.has("mouth")) state.cmd.mouthOpen = Number(qp.get("mouth")) || 0;
-    if (qp.has("skill")) duckApi.doSkill(qp.get("skill"));
+    if (qp.has("skill")) {
+      duckApi.doSkill(qp.get("skill"));
+      if (qp.has("skill_phase") && state.activeSkill) {
+        state.activeSkill.elapsed = Number(qp.get("skill_phase")) * state.activeSkill.duration;
+        state.activeSkill.frozen = true;
+      }
+    }
   } catch {}
 
   pushLog("init", "MicroDuck 50 Hz Digital Twin initialized.");
