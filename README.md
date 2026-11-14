@@ -18,10 +18,10 @@ An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Sim
 
 ## ✨ Key Capabilities
 
-1. **Articulated 15-DOF SE(3) CAD Rig & Hardware Shell Visualizer**
-   - Real-time forward kinematics across all 15 robot bodies (`left/right hip_yaw, hip_roll, hip_pitch, knee, ankle`, `neck_pitch`, `head_pitch, head_yaw, head_roll`, and `mouth`).
-   - Supports 5 authentic hardware shell colorways (*Cream White + Orange Beak*, *Sky Blue V5*, *Lavender Purple*, *Slate Tactical*, and *Raw CAD*).
-   - Ankle-mounted polyurethane roller-skate wheel assembly (`V5_AUDIO_VIDEO_TIRE_01.stl`) with a $5.2\text{ Hz}$ speed-skater crouch, alternating lateral leg push-off strides, and synchronized wheel rotation in `roller` locomotion mode.
+1. **Articulated 15-DOF SE(3) CAD Rig, 36° Creased Normals & Inline Roller-Blade Assembly**
+   - Real-time forward kinematics across all 15 robot bodies (`left/right hip_yaw, hip_roll, hip_pitch, knee, ankle`, `neck_pitch`, `head_pitch, head_yaw, head_roll`, and `mouth`) with **36° (`Math.PI / 5`) creased vertex normal smoothing** and automatic hot-upgrade to the 38-mesh (`104,024` triangle) CAD `microduck.glb` geometry.
+   - **16-Slot PBR Material Table** across all 5 hardware shell colorways (*Cream / Classic White & Orange*, *Sky / Light Blue & Orange*, *Lavender / Purple & Yellow*, *Graphite / Charcoal & Yellow*, and *Raw CAD*), plus RANSAC-fitted physical jaw hinge pivot (`[0, 0.00004, 0.0075]`) and 4-point studio lighting over an antialiased GLSL Tron grid.
+   - **Authentic Inline Roller-Blade Assembly & Skating Physics:** Swaps walking soles for the 2-wheel inline roller-blade assembly (`ankle_l_v1.stl`, `ankle_r_v1.stl`, `roller_blade.stl`, and front/rear `rim.stl` + `tire.stl` wheels on passive Z-axis hinges `passive_LF/LR/RF/RR_wheel`) with V-push skating stride (`RVEL_FWD = 0.60 m/s`), CoM carve lean, and **Crouch Glide (`roller_crouch`)** skill (`BEST_roller.onnx` & `BEST_roller_crouch.onnx`).
    - Interactive **Subsystem Inspector HUD Bar** and glassmorphic hover tooltips explaining every control, sensor, policy, and safety subsystem.
 
 2. **50 Hz Closed-Loop Code Lab, Sim-to-Real Gap Injector & AI Controller Synthesizer**
@@ -68,6 +68,7 @@ This project builds upon and references the open hardware and software ecosystem
 | Upstream Project | Repository / Resource | Role & How It Is Referenced | Upstream License |
 | :--- | :--- | :--- | :--- |
 | **Pollen Robotics — MicroDuck Software Stack** | [`pollen-robotics/microduck`](https://github.com/pollen-robotics/microduck) | Reference specification for the 15-DOF joint order, 61-D observation vector, 63-D pickup feature layout, MJCF kinematics, and emotion keyframes fetched by [`src/extract_ground_truth.py`](src/extract_ground_truth.py). | Apache-2.0 |
+| **Pollen Robotics — MicroDuck Web Simulator** | [`pollen-robotics/microduck-simulator`](https://huggingface.co/spaces/pollen-robotics/microduck-simulator) | Reference for 36° creased normal smoothing, 16-slot PBR colorway palettes, RANSAC jaw pivot, antialiased GLSL floor shader, and the inline roller-blade MJCF kinematics (`kinematics_rollers.json`) & policies (`BEST_roller.onnx`, `BEST_roller_crouch.onnx`) fetched by [`scripts/fetch_upstream_assets.sh`](scripts/fetch_upstream_assets.sh). | Apache-2.0 |
 | **Pollen Robotics — MicroDuck RL & Policies** | [`pollen-robotics/microduck_rl`](https://github.com/pollen-robotics/microduck_rl) & [`pollen-robotics/microduck-policies`](https://huggingface.co/pollen-robotics/microduck-policies) | Pre-trained ONNX locomotion policies (`velstand`, `walk`, `stand`, `roller`) downloaded on demand into `web/assets/policies/`. | Apache-2.0 |
 | **Luwu Dynamics (XGO) — XGO-Duck Hardware** | [`LuwuDynamics/xgoduck_hardware`](https://github.com/LuwuDynamics/xgoduck_hardware) | Official V2 Standard (47 STLs) and V5 Audio-Video (50 STLs) 3D-printable shell & roller-wheel CAD files cataloged locally by [`src/build_xgoduck_stl_assets.py`](src/build_xgoduck_stl_assets.py). | Personal / Educational (`LICENSING.md`) |
 | **MuJoCo Lab — `mjlab`** | [`mujocolab/mjlab`](https://github.com/mujocolab/mjlab) | Underlying reinforcement learning training framework used by upstream MicroDuck policies. | Apache-2.0 |

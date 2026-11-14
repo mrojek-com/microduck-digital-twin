@@ -497,3 +497,36 @@ def test_pillar5_pad_imu_complementary_filter_and_dead_radio_trap():
         )
     assert out_stale["dead_radio_trap_detected"] is True
 
+
+def test_hf_visual_and_inline_roller_upgrades():
+    sim_js = (PROJECT_ROOT / "web" / "simulator.js").read_text(encoding="utf-8")
+    index_html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    fetch_sh = (PROJECT_ROOT / "scripts" / "fetch_upstream_assets.sh").read_text(encoding="utf-8")
+
+    # 1. 36-deg creased vertex normals + 16-slot PBR material table + physical jaw hinge
+    assert "computeCreasedGeometry" in sim_js
+    assert "applyCreasedNormalsToBufferGeometry" in sim_js
+    assert "highResGlbGeometries" in sim_js
+    assert "PART_SLOTS" in sim_js
+    assert "setupPhysicalJawPivot" in sim_js
+
+    # 2. Authentic inline roller-blade assembly & Crouch Glide skill (`roller_crouch`)
+    for token in (
+        "ankle_l_v1.stl",
+        "ankle_r_v1.stl",
+        "roller_blade.stl",
+        "passive_LF_wheel",
+        "passive_LR_wheel",
+        "passive_RF_wheel",
+        "passive_RR_wheel",
+        "roller_crouch",
+        "RVEL_FWD = 0.60",
+    ):
+        assert token in sim_js
+    assert 'data-skill="roller_crouch"' in index_html
+
+    # 3. Upstream asset fetch bootstrap includes Apache-2.0 HF simulator assets
+    assert "pollen-robotics/microduck-simulator" in fetch_sh
+    assert "BEST_roller_crouch.onnx" in fetch_sh
+
+

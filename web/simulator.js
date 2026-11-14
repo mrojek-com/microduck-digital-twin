@@ -350,7 +350,10 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 5. Three.js 3D Scene, Authentic CAD Rig (`duck.bin`) & FLUX AI GLB Loader
+  // 5. Three.js 3D Scene, Authentic CAD Rig (`duck.bin` + MJLab GLB) & Inline Skates
+  //    Visual & kinematics techniques adapted with attribution from:
+  //    - pollen-robotics/microduck (Apache-2.0)
+  //    - pollen-robotics/microduck-simulator (Apache-2.0)
   // ---------------------------------------------------------------------------
   const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -361,8 +364,8 @@
   renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b101b);
-  scene.fog = new THREE.FogExp2(0x0b101b, 0.14);
+  scene.background = new THREE.Color(0x08080c);
+  scene.fog = new THREE.FogExp2(0x08080c, 0.12);
 
   const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.02, 40);
   camera.position.set(0.55, 0.36, 0.58);
@@ -377,10 +380,11 @@
   controls.maxDistance = 3.5;
   controls.maxPolarAngle = Math.PI * 0.495; // Never dip below the floor
 
-  // Lighting
-  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.65));
-  const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
-  keyLight.position.set(1.8, 3.0, 2.2);
+  // Calibrated 4-Point Studio Lighting + Warm Amber Rim (from MJLab GameCanvas.jsx, Apache-2.0)
+  scene.add(new THREE.AmbientLight(0xffffff, 0.60));
+  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.35));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.60);
+  keyLight.position.set(2.0, 4.0, 2.0);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(2048, 2048);
   keyLight.shadow.camera.near = 0.1;
@@ -391,25 +395,77 @@
   keyLight.shadow.camera.bottom = -2;
   scene.add(keyLight);
 
-  const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.65);
-  rimLight.position.set(-2.0, 1.4, -1.8);
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.40);
+  fillLight.position.set(-2.0, 2.0, 1.5);
+  scene.add(fillLight);
+
+  const rimLight = new THREE.DirectionalLight(0xffb366, 0.70);
+  rimLight.position.set(0.0, 3.0, -2.0);
   scene.add(rimLight);
 
-  // Arena Floor + Grid
-  const floorGeo = new THREE.PlaneGeometry(14, 14);
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x0f172a,
-    roughness: 0.78,
-    metalness: 0.08,
+  // Arena Floor + Antialiased GLSL Tron Grid Shader (adapted from MJLab arena.js, Apache-2.0)
+  const floorGeo = new THREE.PlaneGeometry(24, 24);
+  const floorMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      uFocus: { value: new THREE.Vector3(0, 0, 0) },
+      uCell: { value: 0.10 },
+      uSection: { value: 0.60 },
+      uFade: { value: 6.5 },
+      uColor1: { value: new THREE.Color(0x8e8371) },
+      uColor2: { value: new THREE.Color(0xffb366) },
+    },
+    vertexShader: `
+      varying vec3 vWorld;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorld;
+      uniform vec3 uFocus;
+      uniform float uCell;
+      uniform float uSection;
+      uniform float uFade;
+      uniform vec3 uColor1;
+      uniform vec3 uColor2;
+
+      float gridLine(vec2 p, float size, float widthPx) {
+        vec2 r = p / size;
+        vec2 g = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+        float d = min(g.x, g.y);
+        return 1.0 - min(d / widthPx, 1.0);
+      }
+
+      void main() {
+        float g1 = gridLine(vWorld.xz, uCell, 1.15);
+        float g2 = gridLine(vWorld.xz, uSection, 1.85);
+        float g2Halo = gridLine(vWorld.xz, uSection, 4.5);
+        float dist = length(vWorld.xz - uFocus.xz);
+        float fade = pow(clamp(1.0 - dist / uFade, 0.0, 1.0), 1.6);
+        vec3 col = mix(uColor1, uColor2, clamp(g2 + g2Halo * 0.35, 0.0, 1.0));
+        float alpha = (g1 * 0.26 + g2 * 0.68 + g2Halo * 0.14) * fade;
+        if (alpha <= 0.002) discard;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
   });
+  const floorBaseMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(24, 24),
+    new THREE.MeshStandardMaterial({ color: 0x08080c, roughness: 0.85, metalness: 0.05 })
+  );
+  floorBaseMesh.rotation.x = -Math.PI / 2;
+  floorBaseMesh.position.y = -0.001;
+  floorBaseMesh.receiveShadow = true;
+  scene.add(floorBaseMesh);
+
   const floorMesh = new THREE.Mesh(floorGeo, floorMat);
   floorMesh.rotation.x = -Math.PI / 2;
-  floorMesh.receiveShadow = true;
+  floorMesh.position.y = 0.001;
   scene.add(floorMesh);
-
-  const gridHelper = new THREE.GridHelper(6, 60, 0x334155, 0x1e293b);
-  gridHelper.position.y = 0.001;
-  scene.add(gridHelper);
 
   // Contact shadow disc under robot
   const shadowDisc = new THREE.Mesh(
@@ -475,89 +531,384 @@
   let cadBodyGroups = [];
   let cadRigData = null;
   const rollerWheels = [];
+  const walkingFootMeshes = [];
+  const inlineRollerMeshes = [];
+  let jawPivotGroup = null;
   let tireAssetData = null;
+  const highResGlbGeometries = new Map();
 
-  function tryAttachRollerWheels() {
-    if (!tireAssetData || !cadBodyGroups || cadBodyGroups.length < 15 || rollerWheels.length > 0) return;
+  // Exact mapping of the 29 mesh indices in `duck.bin` to MJCF STL names
+  const DUCK_BIN_MESH_NAMES = [
+    "seeed_bearing__configuration__22x16x4.stl", // 0
+    "right_shell.stl",                           // 1
+    "trunk_base.stl",                            // 2
+    "xl330.stl",                                 // 3
+    "np_f970.stl",                               // 4
+    "left_shell.stl",                            // 5
+    "yaw2roll.stl",                              // 6
+    "bearing_roll.stl",                          // 7
+    "hip_l.stl",                                 // 8
+    "upper_leg_left.stl",                        // 9
+    "upper_leg_rigidity_plate.stl",              // 10
+    "leg.stl",                                   // 11
+    "sole_left.stl",                             // 12
+    "foot_left.stl",                             // 13
+    "seeed_bearing__configuration_default.stl",  // 14
+    "ankle_left.stl",                            // 15
+    "neck.stl",                                  // 16
+    "neck_pitch.stl",                            // 17
+    "yaw_roll_motion.stl",                       // 18
+    "face_part.stl",                             // 19
+    "jaw_soft.stl",                              // 20
+    "soft_mouth_top.stl",                        // 21
+    "bottom_head_shell.stl",                     // 22
+    "top_head_shell.stl",                        // 23
+    "jaw.stl",                                   // 24
+    "upper_leg_right.stl",                       // 25
+    "ankle_right.stl",                           // 26
+    "sole_right.stl",                            // 27
+    "foot_right.stl",                            // 28
+  ];
+
+  // Exact 16-Slot PBR Material Table & Part Mapping (adapted from MJLab variants.js, Apache-2.0)
+  const PART_SLOTS = {
+    "top_head_shell.stl": "head",
+    "bottom_head_shell.stl": "head",
+    "face_part.stl": "facePlate",
+    "noenoeil.stl": "eyeRing",
+    "lens.stl": "lens",
+    "m12_lens_holder.stl": "eyeMount",
+    "soft_mouth_top.stl": "beakUpper",
+    "jaw.stl": "beakLower",
+    "jaw_soft.stl": "tongue",
+    "trunk_base.stl": "trunk",
+    "left_shell.stl": "wings",
+    "right_shell.stl": "wings",
+    "upper_leg_left.stl": "thighs",
+    "upper_leg_right.stl": "thighs",
+    "hip_l.stl": "thighs",
+    "foot_left.stl": "feet",
+    "foot_right.stl": "feet",
+    "ankle_left.stl": "feet",
+    "ankle_right.stl": "feet",
+    "ankle_l_v1.stl": "feet",
+    "ankle_r_v1.stl": "feet",
+    "roller_blade.stl": "feet",
+    "sole_left.stl": "soles",
+    "sole_right.stl": "soles",
+    "rim.stl": "soles",
+    "tire.stl": "tire",
+    "xl330.stl": "motors",
+    "leg.stl": "legs",
+    "neck.stl": "neck",
+    "neck_pitch.stl": "joints",
+    "yaw_roll_motion.stl": "joints",
+    "yaw2roll.stl": "joints",
+    "bearing_roll.stl": "joints",
+    "motor_support.stl": "joints",
+    "power_support.stl": "joints",
+    "banana_pcb_locker.stl": "joints",
+    "upper_leg_rigidity_plate.stl": "joints",
+    "seeed_bearing__configuration__22x16x4.stl": "bearings",
+    "seeed_bearing__configuration_default.stl": "bearings",
+    "np_f970.stl": "internals",
+    "speaker.stl": "internals",
+    "elec_rpi_robot_hat_pcb.stl": "internals",
+    "pcb__raspberry_pi_zero_2_w.stl": "internals",
+  };
+
+  function makePalette(overrides) {
+    const base = {
+      head:      { color: 0xf4f1ea, roughness: 0.35, metalness: 0.0 },
+      facePlate: { color: 0x9b9892, roughness: 0.35, metalness: 0.0 },
+      eyeRing:   { color: 0x1d1d1f, roughness: 0.35, metalness: 0.0 },
+      lens:      { color: 0x0a0c14, roughness: 0.05, metalness: 0.0 },
+      eyeMount:  { color: 0x1d1d1f, roughness: 0.50, metalness: 0.0 },
+      beakUpper: { color: 0xffb52e, roughness: 0.45, metalness: 0.0 },
+      beakLower: { color: 0xff7a2f, roughness: 0.35, metalness: 0.0 },
+      tongue:    { color: 0xffb52e, roughness: 0.45, metalness: 0.0 },
+      trunk:     { color: 0x3a3a3e, roughness: 0.50, metalness: 0.0 },
+      wings:     { color: 0xf4f1ea, roughness: 0.35, metalness: 0.0 },
+      thighs:    { color: 0xf4f1ea, roughness: 0.35, metalness: 0.0 },
+      feet:      { color: 0xff7a2f, roughness: 0.35, metalness: 0.0 },
+      soles:     { color: 0xffd23f, roughness: 0.55, metalness: 0.0 },
+      tire:      { color: 0x1d1d1f, roughness: 0.55, metalness: 0.3 },
+      motors:    { color: 0x1d1d1f, roughness: 0.55, metalness: 0.0 },
+      legs:      { color: 0x2c2c30, roughness: 0.25, metalness: 0.85 },
+      neck:      { color: 0x2c2c30, roughness: 0.25, metalness: 0.85 },
+      joints:    { color: 0x2a2a2e, roughness: 0.45, metalness: 0.2 },
+      bearings:  { color: 0x8a8e94, roughness: 0.25, metalness: 0.85 },
+      internals: { color: 0x1d1d1f, roughness: 0.55, metalness: 0.0 },
+    };
+    if (overrides) {
+      for (const [k, v] of Object.entries(overrides)) {
+        base[k] = { ...base[k], ...v };
+      }
+    }
+    return base;
+  }
+
+  const HARDWARE_COLORWAYS = {
+    white_orange: {
+      label: "Cream (Classic White & Orange)",
+      slots: makePalette({}),
+    },
+    sky_blue: {
+      label: "Sky (Light Blue & Orange)",
+      slots: makePalette({
+        head:   { color: 0x8ad0e8 },
+        wings:  { color: 0x8ad0e8 },
+        thighs: { color: 0x8ad0e8 },
+      }),
+    },
+    lavender_yellow: {
+      label: "Lavender (Purple & Yellow)",
+      slots: makePalette({
+        head:      { color: 0x9b82c4 },
+        wings:     { color: 0x9b82c4 },
+        thighs:    { color: 0x9b82c4 },
+        eyeRing:   { color: 0x7bc8d4 },
+        beakUpper: { color: 0xa489b5 },
+        tongue:    { color: 0xa489b5 },
+        beakLower: { color: 0xffd23f },
+        feet:      { color: 0xffd23f },
+        soles:     { color: 0x7bc8d4 },
+      }),
+    },
+    slate_purple: {
+      label: "Graphite (Charcoal & Yellow)",
+      slots: makePalette({
+        head:      { color: 0x45454a },
+        wings:     { color: 0x45454a },
+        thighs:    { color: 0x45454a },
+        eyeRing:   { color: 0x8068b0 },
+        beakUpper: { color: 0xa489b5 },
+        tongue:    { color: 0xa489b5 },
+        beakLower: { color: 0xffd23f },
+        feet:      { color: 0xffd23f },
+        soles:     { color: 0x8068b0 },
+      }),
+    },
+    cad_raw: null,
+  };
+
+  // Compute 36° creased vertex normals (CREASE = Math.PI / 5) with 1e-4m vertex welding
+  // (Adapted from MJLab duck.js, Apache-2.0 — eliminates faceted flat-shaded polygons on curved shells)
+  function computeCreasedGeometry(vertsArray, trisArray, creaseAngle = Math.PI / 5) {
+    const cosThresh = Math.cos(creaseAngle);
+    const nTris = trisArray.length;
+    const faceNormals = new Float32Array(nTris * 3);
+    const vertFaces = new Map();
+
+    const keyOf = (v) => `${Math.round(v[0] * 10000)},${Math.round(v[1] * 10000)},${Math.round(v[2] * 10000)}`;
+
+    for (let t = 0; t < nTris; t++) {
+      const tri = trisArray[t];
+      const v0 = vertsArray[tri[0]];
+      const v1 = vertsArray[tri[1]];
+      const v2 = vertsArray[tri[2]];
+      const ux = v1[0] - v0[0], uy = v1[1] - v0[1], uz = v1[2] - v0[2];
+      const vx = v2[0] - v0[0], vy = v2[1] - v0[1], vz = v2[2] - v0[2];
+      let nx = uy * vz - uz * vy;
+      let ny = uz * vx - ux * vz;
+      let nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      faceNormals[t * 3] = nx;
+      faceNormals[t * 3 + 1] = ny;
+      faceNormals[t * 3 + 2] = nz;
+
+      for (let c = 0; c < 3; c++) {
+        const k = keyOf(vertsArray[tri[c]]);
+        let list = vertFaces.get(k);
+        if (!list) {
+          list = [];
+          vertFaces.set(k, list);
+        }
+        list.push(t);
+      }
+    }
+
+    const posOut = new Float32Array(nTris * 9);
+    const normOut = new Float32Array(nTris * 9);
+    for (let t = 0; t < nTris; t++) {
+      const tri = trisArray[t];
+      const fnx = faceNormals[t * 3];
+      const fny = faceNormals[t * 3 + 1];
+      const fnz = faceNormals[t * 3 + 2];
+
+      for (let c = 0; c < 3; c++) {
+        const v = vertsArray[tri[c]];
+        const outBase = t * 9 + c * 3;
+        posOut[outBase] = v[0];
+        posOut[outBase + 1] = v[1];
+        posOut[outBase + 2] = v[2];
+
+        const adj = vertFaces.get(keyOf(v));
+        let sx = 0, sy = 0, sz = 0;
+        for (let i = 0; i < adj.length; i++) {
+          const ft = adj[i];
+          const onx = faceNormals[ft * 3];
+          const ony = faceNormals[ft * 3 + 1];
+          const onz = faceNormals[ft * 3 + 2];
+          if (fnx * onx + fny * ony + fnz * onz >= cosThresh) {
+            sx += onx; sy += ony; sz += onz;
+          }
+        }
+        const slen = Math.hypot(sx, sy, sz) || 1;
+        normOut[outBase] = sx / slen;
+        normOut[outBase + 1] = sy / slen;
+        normOut[outBase + 2] = sz / slen;
+      }
+    }
+
     const g = new THREE.BufferGeometry();
-    const verts = new Float32Array(tireAssetData.verts.flat());
-    const indices = new Uint32Array(tireAssetData.faces.flat());
-    g.setAttribute("position", new THREE.BufferAttribute(verts, 3));
-    g.setIndex(new THREE.BufferAttribute(indices, 1));
-    g.computeVertexNormals();
+    g.setAttribute("position", new THREE.BufferAttribute(posOut, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(normOut, 3));
+    return g;
+  }
 
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x00d8f6, // Vibrant cyan polyurethane skate tire
-      roughness: 0.35,
-      metalness: 0.15,
-      flatShading: true,
-    });
-    const radius = tireAssetData.radius_m || 0.015;
-    // Ensure world matrices reflect Home Pose before sampling foot bounds
-    applyJointsToCadGroups(cadBodyGroups, DEFAULT_POSITION);
-    duckWorldRoot.updateMatrixWorld(true);
+  function applyCreasedNormalsToBufferGeometry(geom, creaseAngle = Math.PI / 5) {
+    const posAttr = geom.getAttribute("position");
+    if (!posAttr) return geom;
+    const idxAttr = geom.getIndex();
+    const verts = [];
+    for (let i = 0; i < posAttr.count; i++) {
+      verts.push([posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)]);
+    }
+    const tris = [];
+    if (idxAttr) {
+      for (let i = 0; i < idxAttr.count; i += 3) {
+        tris.push([idxAttr.getX(i), idxAttr.getX(i + 1), idxAttr.getX(i + 2)]);
+      }
+    } else {
+      for (let i = 0; i < posAttr.count; i += 3) {
+        tris.push([i, i + 1, i + 2]);
+      }
+    }
+    return computeCreasedGeometry(verts, tris, creaseAngle);
+  }
 
-    // Target world orientation: wheel axle along world Z axis (rolls forward along X)
-    const targetWorldQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+  // Mount authentic inline roller-blade assemblies (`ankle_l_v1`, `ankle_r_v1`, `roller_blade.stl`,
+  // and front/rear inline `rim.stl` + `tire.stl` wheels from `kinematics_rollers.json`)
+  function tryAttachRollerWheels() {
+    if (!cadBodyGroups || cadBodyGroups.length < 15 || rollerWheels.length > 0) return;
+    const rMeshes = window.__MICRODUCK_ROLLER_MESHES__;
+    if (!rMeshes || !rMeshes["roller_blade.stl"]) return;
 
-    // Mount 2 wheels on outer edge of left foot (body 5) and right foot (body 14)
-    [
-      { bodyIdx: 5, sideSign: -1 }, // Left foot (Z < 0)
-      { bodyIdx: 14, sideSign: 1 },  // Right foot (Z > 0)
-    ].forEach(({ bodyIdx, sideSign }) => {
-      const ankleGrp = cadBodyGroups[bodyIdx];
-      const box = new THREE.Box3().setFromObject(ankleGrp);
-      const center = new THREE.Vector3();
-      const size = new THREE.Vector3();
-      box.getCenter(center);
-      box.getSize(size);
+    const rGeoms = {};
+    for (const [mName, mData] of Object.entries(rMeshes)) {
+      rGeoms[mName] = computeCreasedGeometry(mData.verts, mData.tris);
+    }
 
-      const ankleWorldQuat = new THREE.Quaternion();
-      ankleGrp.getWorldQuaternion(ankleWorldQuat);
-      const localWheelQuat = ankleWorldQuat.clone().invert().multiply(targetWorldQuat);
+    const makeRollerMesh = (stlName, pos, quat) => {
+      const slot = PART_SLOTS[stlName] || "joints";
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.35,
+        metalness: 0.0,
+        flatShading: false,
+        side: THREE.DoubleSide,
+      });
+      const m = new THREE.Mesh(rGeoms[stlName], mat);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.position.set(pos[0], pos[1], pos[2]);
+      m.quaternion.set(quat[1], quat[2], quat[3], quat[0]).normalize();
+      m.userData.stlName = stlName;
+      m.userData.slot = slot;
+      return m;
+    };
 
-      [-0.018, 0.018].forEach((xOff) => {
-        const w = new THREE.Mesh(g, mat);
-        w.castShadow = true;
-        w.receiveShadow = true;
-        const worldPos = new THREE.Vector3(
-          center.x + xOff,
-          radius,
-          center.z + sideSign * (size.z * 0.5 + 0.008)
-        );
-        ankleGrp.worldToLocal(worldPos);
-        w.position.copy(worldPos);
-        w.quaternion.copy(localWheelQuat);
-        w.userData.radius = radius;
-        w.visible = state.locomotionMode === "roller" || state.rollerSkatesForced;
-        ankleGrp.add(w);
-        rollerWheels.push(w);
+    // Left ankle (body 5) & right ankle (body 14) inline roller assemblies from `kinematics_rollers.json`
+    const configs = [
+      {
+        bodyIdx: 5,
+        ankleGeoms: [
+          { stl: "roller_blade.stl", pos: [-0.022, 0.00622291, -0.0647], quat: [0.5, -0.5, -0.5, -0.5] },
+          { stl: "ankle_l_v1.stl",   pos: [-0.022, 0.00622291, -0.0647], quat: [0.5, -0.5, -0.5, -0.5] },
+        ],
+        wheels: [
+          { name: "passive_LF_wheel", pos: [-0.0395, -0.0325, -0.0147], quat: [1, 0, 0, 0] },
+          { name: "passive_LR_wheel", pos: [ 0.0255, -0.0325, -0.0147], quat: [1, 0, 0, 0] },
+        ],
+      },
+      {
+        bodyIdx: 14,
+        ankleGeoms: [
+          { stl: "ankle_r_v1.stl",   pos: [0.022, 0.00622291, -0.0647],   quat: [0.5, -0.5, 0.5, 0.5] },
+          { stl: "roller_blade.stl", pos: [0.022, 0.00622291, 0.0355181], quat: [0.5, -0.5, 0.5, 0.5] },
+        ],
+        wheels: [
+          { name: "passive_RF_wheel", pos: [ 0.0395, -0.0325, -0.0144819], quat: [0, 0, 1, 0] },
+          { name: "passive_RR_wheel", pos: [-0.0255, -0.0325, -0.0144819], quat: [0, 0, 1, 0] },
+        ],
+      },
+    ];
+
+    configs.forEach((cfg) => {
+      const ankleGrp = cadBodyGroups[cfg.bodyIdx];
+      cfg.ankleGeoms.forEach((ag) => {
+        const m = makeRollerMesh(ag.stl, ag.pos, ag.quat);
+        ankleGrp.add(m);
+        inlineRollerMeshes.push(m);
+      });
+      cfg.wheels.forEach((wCfg) => {
+        const wGrp = new THREE.Group();
+        wGrp.position.set(wCfg.pos[0], wCfg.pos[1], wCfg.pos[2]);
+        wGrp.quaternion.set(wCfg.quat[1], wCfg.quat[2], wCfg.quat[3], wCfg.quat[0]).normalize();
+        wGrp.userData.baseQuat = wGrp.quaternion.clone();
+        wGrp.userData.wheelAngle = 0;
+        wGrp.userData.radius = 0.015;
+
+        const tireMesh = makeRollerMesh("tire.stl", [0.0175, 0.0387229, -0.05], [0.5, -0.5, -0.5, -0.5]);
+        const rimMesh  = makeRollerMesh("rim.stl",  [0.0175, 0.0387229, -0.05], [0.5, -0.5, -0.5, -0.5]);
+        wGrp.add(tireMesh);
+        wGrp.add(rimMesh);
+        ankleGrp.add(wGrp);
+        inlineRollerMeshes.push(wGrp);
+        rollerWheels.push(wGrp);
       });
     });
 
-    const btnToggleRollerSkates = document.getElementById("btn-toggle-roller-skates");
-    if (btnToggleRollerSkates && state.rollerSkatesForced) {
-      btnToggleRollerSkates.classList.add("active");
-    }
-    pushLog("STL", `Mounted 4 real CAD wheels from V5_AUDIO_VIDEO_TIRE_01.stl (${tireAssetData.faces.length} tris, r=${(radius * 1000).toFixed(1)}mm).`);
+    const selectColorway = document.getElementById("select-colorway");
+    applyColorway(duckCadContainer, selectColorway ? selectColorway.value : "white_orange");
+    syncRollerFootVisibility();
+    pushLog("STL", "Mounted authentic inline roller-blade assemblies (ankle_l/r_v1, roller_blade, 4x rim + tire).");
   }
 
-  function buildCadRigInThree(rig, targetContainer) {
-    // Build Three.js BufferGeometries for the 29 unique CAD meshes
-    const geometries = rig.meshes.map((m) => {
-      const g = new THREE.BufferGeometry();
-      const verts = new Float32Array(m.verts.flat());
-      const indices = new Uint16Array(m.tris.flat());
-      g.setAttribute("position", new THREE.BufferAttribute(verts, 3));
-      g.setIndex(new THREE.BufferAttribute(indices, 1));
-      g.computeVertexNormals();
-      return g;
+  function syncRollerFootVisibility() {
+    const showRoller = state.locomotionMode === "roller" || state.rollerSkatesForced;
+    walkingFootMeshes.forEach((m) => { m.visible = !showRoller; });
+    inlineRollerMeshes.forEach((m) => { m.visible = showRoller; });
+  }
+
+  // True RANSAC-fitted physical jaw hinge pivot (`JAW_HINGE_LOCAL = [0, 0.00004, 0.0075]`, `JAW_MAX_OPEN = 0.32 rad`)
+  // Adapted from MJLab duck.js (Apache-2.0)
+  function setupPhysicalJawPivot(headRollGroup, jawMeshes) {
+    if (!headRollGroup || !jawMeshes.length) return null;
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0.00004, 0.0075);
+    headRollGroup.add(pivot);
+    jawMeshes.forEach((m) => {
+      m.position.sub(pivot.position);
+      pivot.add(m);
+    });
+    return pivot;
+  }
+
+  function buildCadRigInThree(rig, targetContainer, isPrimary = false) {
+    const geometries = rig.meshes.map((m, idx) => {
+      const stlName = DUCK_BIN_MESH_NAMES[idx];
+      if (highResGlbGeometries.has(stlName)) {
+        return highResGlbGeometries.get(stlName);
+      }
+      return computeCreasedGeometry(m.verts, m.tris);
     });
 
     const groups = rig.bodies.map((b) => {
       const grp = new THREE.Group();
       grp.position.set(b.pos[0], b.pos[1], b.pos[2]);
-      // MJCF quat is (w, x, y, z); Three.js is (x, y, z, w)
       grp.userData.baseQuat = new THREE.Quaternion(b.quat[1], b.quat[2], b.quat[3], b.quat[0]).normalize();
       grp.userData.axis = new THREE.Vector3(b.axis[0], b.axis[1], b.axis[2]).normalize();
       grp.userData.jointIdx = b.joint;
@@ -573,70 +924,115 @@
       }
     });
 
-    rig.parts.forEach((p) => {
-      const role = classifyCadPartRole(p.rgb, p.body);
-      const isPlastic = role !== null;
-      const mat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(p.rgb[0] / 255, p.rgb[1] / 255, p.rgb[2] / 255),
-        roughness: isPlastic ? 0.65 : 0.48,
-        metalness: isPlastic ? 0.05 : 0.18,
-        flatShading: true,
-        side: THREE.DoubleSide,
+    // If `kinematics.json` is available, build from its full 70-part list (includes lens, eye rings, m12 mount, PCBs)
+    const kinLegs = window.__MICRODUCK_KIN_LEGS__;
+    const jawMeshes = [];
+
+    if (kinLegs && kinLegs.bodies && kinLegs.bodies.length === 15) {
+      const nameToMeshIdx = {};
+      DUCK_BIN_MESH_NAMES.forEach((n, i) => { nameToMeshIdx[n] = i; });
+
+      kinLegs.bodies.forEach((kb, bodyIdx) => {
+        (kb.geoms || []).forEach((g) => {
+          const stlName = g.mesh;
+          let geom = highResGlbGeometries.get(stlName);
+          if (!geom && nameToMeshIdx[stlName] !== undefined) {
+            geom = geometries[nameToMeshIdx[stlName]];
+          }
+          if (!geom) return;
+
+          const slot = PART_SLOTS[stlName] || "joints";
+          const rawRgb = g.color ? [Math.round(g.color[0] * 255), Math.round(g.color[1] * 255), Math.round(g.color[2] * 255)] : [200, 200, 200];
+          const mat = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(rawRgb[0] / 255, rawRgb[1] / 255, rawRgb[2] / 255),
+            roughness: 0.35,
+            metalness: 0.0,
+            flatShading: false,
+            side: THREE.DoubleSide,
+          });
+          const mesh = new THREE.Mesh(geom, mat);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.position.set(g.pos[0], g.pos[1], g.pos[2]);
+          mesh.quaternion.set(g.quat[1], g.quat[2], g.quat[3], g.quat[0]).normalize();
+          mesh.userData.baseRgb = rawRgb;
+          mesh.userData.bodyIdx = bodyIdx;
+          mesh.userData.stlName = stlName;
+          mesh.userData.slot = slot;
+          groups[bodyIdx].add(mesh);
+
+          if (isPrimary) {
+            if (["foot_left.stl", "sole_left.stl", "ankle_left.stl", "foot_right.stl", "sole_right.stl", "ankle_right.stl"].includes(stlName)) {
+              walkingFootMeshes.push(mesh);
+            }
+            if (stlName === "jaw.stl" || stlName === "jaw_soft.stl") {
+              jawMeshes.push(mesh);
+            }
+          }
+        });
       });
-      const mesh = new THREE.Mesh(geometries[p.mesh], mat);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
-      mesh.quaternion.set(p.quat[1], p.quat[2], p.quat[3], p.quat[0]).normalize();
-      mesh.userData.baseRgb = p.rgb;
-      mesh.userData.bodyIdx = p.body;
-      groups[p.body].add(mesh);
-    });
+    } else {
+      rig.parts.forEach((p) => {
+        const stlName = DUCK_BIN_MESH_NAMES[p.mesh] || "trunk_base.stl";
+        const slot = PART_SLOTS[stlName] || "joints";
+        const mat = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(p.rgb[0] / 255, p.rgb[1] / 255, p.rgb[2] / 255),
+          roughness: 0.35,
+          metalness: 0.0,
+          flatShading: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(geometries[p.mesh], mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+        mesh.quaternion.set(p.quat[1], p.quat[2], p.quat[3], p.quat[0]).normalize();
+        mesh.userData.baseRgb = p.rgb;
+        mesh.userData.bodyIdx = p.body;
+        mesh.userData.stlName = stlName;
+        mesh.userData.slot = slot;
+        groups[p.body].add(mesh);
+
+        if (isPrimary) {
+          if (["foot_left.stl", "sole_left.stl", "ankle_left.stl", "foot_right.stl", "sole_right.stl", "ankle_right.stl"].includes(stlName)) {
+            walkingFootMeshes.push(mesh);
+          }
+          if (stlName === "jaw.stl" || stlName === "jaw_soft.stl") {
+            jawMeshes.push(mesh);
+          }
+        }
+      });
+    }
+
+    if (isPrimary && jawMeshes.length > 0) {
+      jawPivotGroup = setupPhysicalJawPivot(groups[9], jawMeshes);
+    }
 
     return groups;
   }
 
-  const HARDWARE_COLORWAYS = {
-    white_orange: { label: "Classic White & Orange", shell: 0xf4f1ea, trim: 0xf97316, eyeRing: 0xfacc15, sole: 0xfacc15 },
-    sky_blue:     { label: "Sky Blue & Orange",      shell: 0xb5e8f7, trim: 0xf97316, eyeRing: 0xfacc15, sole: 0xfacc15 },
-    lavender_yellow: { label: "Lavender & Cyan",     shell: 0xcbb7e8, trim: 0xfacc15, eyeRing: 0x99e2e8, sole: 0xfacc15 },
-    slate_purple: { label: "Stealth Slate & Purple", shell: 0x525866, trim: 0xfacc15, eyeRing: 0x9d6be8, sole: 0x9d6be8 },
-    cad_raw:      null,
-  };
-
-  function classifyCadPartRole(rgb, bodyIdx) {
-    const key = `${rgb[0]},${rgb[1]},${rgb[2]}`;
-    if (key === "234,234,234" || key === "137,218,211" || key === "217,193,221" || key === "196,226,243") {
-      return "shell";
-    }
-    if (key === "248,135,1" || key === "232,146,42" || key === "138,174,214") {
-      return "trim";
-    }
-    if (key === "250,182,1") {
-      return bodyIdx === 9 ? "eyeRing" : "sole";
-    }
-    return null;
-  }
-
   function applyColorway(targetRoot, colorwayKey) {
-    const palette = HARDWARE_COLORWAYS[colorwayKey] || null;
+    const variant = HARDWARE_COLORWAYS[colorwayKey] || null;
     targetRoot.traverse((child) => {
-      if (!child.isMesh || !child.userData.baseRgb) return;
-      const base = child.userData.baseRgb;
-      if (!palette) {
+      if (!child.isMesh) return;
+      if (!variant || !variant.slots) {
+        const base = child.userData.baseRgb || [220, 220, 220];
         child.material.color.setRGB(base[0] / 255, base[1] / 255, base[2] / 255);
+        child.material.roughness = 0.42;
+        child.material.metalness = 0.10;
         return;
       }
-      const role = classifyCadPartRole(base, child.userData.bodyIdx);
-      if (role && palette[role] !== undefined) {
-        child.material.color.setHex(palette[role]);
-      } else {
-        child.material.color.setRGB(base[0] / 255, base[1] / 255, base[2] / 255);
+      const slotName = child.userData.slot || PART_SLOTS[child.userData.stlName] || "joints";
+      const spec = variant.slots[slotName] || variant.slots.joints;
+      if (spec) {
+        child.material.color.setHex(spec.color);
+        child.material.roughness = spec.roughness;
+        child.material.metalness = spec.metalness;
       }
     });
   }
 
-  function applyJointsToCadGroups(groups, joints15) {
+  function applyJointsToCadGroups(groups, joints15, mouthOpenRatio = 0) {
     if (!groups || !groups.length) return;
     const tmpQ = new THREE.Quaternion();
     for (let i = 0; i < groups.length; i++) {
@@ -648,21 +1044,24 @@
         g.quaternion.multiply(tmpQ);
       }
     }
+    if (jawPivotGroup) {
+      const clamped = Math.max(0, Math.min(1, mouthOpenRatio));
+      jawPivotGroup.rotation.set(0, 0, -clamped * 0.32); // JAW_MAX_OPEN = 0.32 rad around -Z
+    }
   }
 
-  // Load ground-truth CAD rig & V5 Roller Tire (synchronously from bundle if available so file:// & http:// work in 0ms)
+  // Load ground-truth CAD rig immediately from bundle, then hot-upgrade to high-res `microduck.glb` (104k tris)
   function mountCadRig(rig) {
     if (!rig || cadRigData) return;
     cadRigData = rig;
-    cadBodyGroups = buildCadRigInThree(rig, duckCadContainer);
-    // Shift Z-up container slightly so Home Pose feet rest flush on Y=0
+    cadBodyGroups = buildCadRigInThree(rig, duckCadContainer, true);
     const footOffset = rig.home_pose_stats ? rig.home_pose_stats.foot_offset_y : 0;
     duckCadContainer.position.y = footOffset;
-    applyJointsToCadGroups(cadBodyGroups, state.joints);
+    applyJointsToCadGroups(cadBodyGroups, state.joints, state.cmd.mouthOpen);
     const selectColorway = document.getElementById("select-colorway");
     applyColorway(duckCadContainer, selectColorway ? selectColorway.value : "white_orange");
     tryAttachRollerWheels();
-    pushLog("CAD", `Loaded duck.bin rig (${rig.bodies.length} bodies, ${rig.parts.length} parts).`);
+    pushLog("CAD", `Loaded articulated rig with 36° creased normals & 16-slot PBR materials.`);
 
     // Build 3 companion ducks for the 4-Duck Chorale with distinct authentic hardware colorways
     const choirOffsets = [
@@ -678,11 +1077,44 @@
       cCad.rotation.x = -Math.PI / 2;
       cCad.position.y = footOffset;
       cRoot.add(cCad);
-      const cGroups = buildCadRigInThree(rig, cCad);
-      applyJointsToCadGroups(cGroups, DEFAULT_POSITION);
+      const cGroups = buildCadRigInThree(rig, cCad, false);
+      applyJointsToCadGroups(cGroups, DEFAULT_POSITION, 0);
       applyColorway(cCad, cfg.colorway);
       choirGroup.add(cRoot);
     });
+
+    // Asynchronously load high-res `assets/mjlab/microduck.glb` (38 CAD STLs, 104k tris) and hot-swap geometries
+    if (THREE.GLTFLoader) {
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        "assets/mjlab/microduck.glb",
+        (gltf) => {
+          gltf.scene.traverse((node) => {
+            if (node.isMesh && node.geometry) {
+              const meshName = node.name.endsWith(".stl") ? node.name : `${node.name}.stl`;
+              highResGlbGeometries.set(meshName, applyCreasedNormalsToBufferGeometry(node.geometry, Math.PI / 5));
+            }
+          });
+          if (highResGlbGeometries.size > 0) {
+            while (duckCadContainer.children.length > 0) {
+              duckCadContainer.remove(duckCadContainer.children[0]);
+            }
+            walkingFootMeshes.length = 0;
+            inlineRollerMeshes.length = 0;
+            rollerWheels.length = 0;
+            jawPivotGroup = null;
+            cadBodyGroups = buildCadRigInThree(cadRigData, duckCadContainer, true);
+            applyJointsToCadGroups(cadBodyGroups, state.joints, state.cmd.mouthOpen);
+            tryAttachRollerWheels();
+            const selCol = document.getElementById("select-colorway");
+            applyColorway(duckCadContainer, selCol ? selCol.value : "white_orange");
+            pushLog("GLB", `Upgraded rig to high-resolution MJLab CAD meshes (${highResGlbGeometries.size} STLs, 36° creased normals).`);
+          }
+        },
+        undefined,
+        () => {}
+      );
+    }
   }
 
   if (window.__MICRODUCK_V5_TIRE__) {
@@ -1357,6 +1789,23 @@
         a[6] = 0.2 * crouch + 0.4 * tuck - 0.15 * reach;
         break;
       }
+      case "roller_crouch": {
+        // Phase-encoded Crouch-Glide (`BEST_roller_crouch.onnx`: CROUCH_PERIOD_S=5.0s, CROUCH_END_PHASE=0.7 -> 3.5s)
+        // Sinks smoothly into a low aerodynamic speed-skater tuck while gliding on all 4 inline wheels, then rises cleanly.
+        const dip = pulse(0.0, 0.26, 0.68, 0.98, p);
+        const carve = Math.sin(p * Math.PI * 2.0) * 0.06 * dip;
+        pose.liftY = -0.048 * dip;
+        pose.pitchFall = 0.11 * dip;
+        pose.rollFall = carve;
+        bothLegs(-0.52 * dip, 1.04 * dip, -0.52 * dip);
+        a[1] = -carve * 0.8;
+        a[10] = -carve * 0.8;
+        a[5] = 0.38 * dip; // Neck tucked forward
+        a[6] = -0.18 * dip; // Gaze level ahead
+        a[8] = -carve * 0.7;
+        cmd.mouthOpen = 0.35 * pulse(0.25, 0.4, 0.65, 0.85, p);
+        break;
+      }
     }
   }
 
@@ -1464,57 +1913,49 @@
       // Walking / Roller locomotion cycle
       if (!state.isSeated && speed > 0.01) {
         if (state.locomotionMode === "roller") {
-          // Dynamic Roller Skating Leg Stride (matching authentic XGO-Duck roller policy)
-          // The duck performs rhythmic alternating skating thrusts, pushing laterally & backward
-          // while leaning gracefully into each gliding stride on its 4 polyurethane wheels.
-          const skateFreq = 5.2; // Natural dynamic skating cadence
+          // Authentic Inline Roller Skating Stride (`BEST_roller.onnx` velocity envelope:
+          // RVEL_FWD = 0.60 m/s, RVEL_BACK = -0.50 m/s, RVEL_ANG = 0.30 rad/s)
+          const skateFreq = 4.6;
           const phase = state.time * skateFreq;
           const s = Math.sin(phase);
-          const strideAmp = Math.min(1.0, speed * 2.8);
+          const strideAmp = Math.min(1.0, speed * 2.4);
 
-          // Athletic low aerodynamic crouch
-          const crouch = 0.20;
+          // Balanced inline-skate knee bend & ankle trim
+          const crouch = 0.22;
           action14[2] = -crouch;
-          action14[3] = crouch * 1.8;
-          action14[4] = -crouch * 0.8;
+          action14[3] = crouch * 1.85;
+          action14[4] = -crouch * 0.85;
           action14[11] = crouch;
-          action14[12] = -crouch * 1.8;
-          action14[13] = crouch * 0.8;
+          action14[12] = -crouch * 1.85;
+          action14[13] = crouch * 0.85;
 
-          // Alternating left/right leg skating push:
-          if (s > 0) {
-            // Left leg pushes outward & back (thrust phase)
-            const thrust = s * strideAmp;
-            action14[1] = -0.22 * thrust;        // Left hip roll outward
-            action14[2] += -0.16 * thrust;       // Left hip pitch extension
-            action14[3] += -0.22 * thrust;       // Left knee push
-            action14[4] += 0.12 * thrust;        // Left ankle flexion
-            // Right leg carries weight & glides smoothly
-            action14[10] = 0.06 * thrust;
-            action14[12] += -0.10 * thrust;      // Right knee compliant flex
-            // Body rolls into the gliding right side
-            state.pose.rollFall = -0.07 * thrust;
-            action14[0] = -0.08 * thrust;        // Counter yaw
-            action14[9] = 0.08 * thrust;
-          } else {
-            // Right leg pushes outward & back (thrust phase)
-            const thrust = -s * strideAmp;
-            action14[10] = 0.22 * thrust;       // Right hip roll outward
-            action14[11] += 0.16 * thrust;      // Right hip pitch extension
-            action14[12] += 0.22 * thrust;      // Right knee push
-            action14[13] += -0.12 * thrust;     // Right ankle flexion
-            // Left leg carries weight & glides smoothly
-            action14[1] = -0.06 * thrust;
-            action14[3] += 0.10 * thrust;       // Left knee compliant flex
-            // Body rolls into the gliding left side
-            state.pose.rollFall = 0.07 * thrust;
-            action14[0] = 0.08 * thrust;        // Counter yaw
-            action14[9] = -0.08 * thrust;
-          }
+          // Smooth alternating V-push & long inline glide:
+          const pushL = Math.max(0, s) * strideAmp;
+          const pushR = Math.max(0, -s) * strideAmp;
 
-          // Aerodynamic neck & head tilt during skate glide
-          action14[5] += 0.14 * strideAmp;      // Neck reaches forward
-          action14[8] += -state.pose.rollFall * 0.75; // Head stabilizes horizontal gaze
+          // Left inline skate push & glide
+          action14[0] = -0.10 * pushL + 0.05 * pushR;  // Slight V-skate toe-out on push
+          action14[1] = -0.19 * pushL + 0.05 * pushR;  // Lateral inline edge push
+          action14[2] += -0.15 * pushL + 0.08 * pushR;
+          action14[3] += -0.20 * pushL + 0.12 * pushR;
+          action14[4] += 0.10 * pushL - 0.06 * pushR;
+
+          // Right inline skate push & glide (mirrored pitch signs)
+          action14[9]  = 0.10 * pushR - 0.05 * pushL;
+          action14[10] = 0.19 * pushR - 0.05 * pushL;
+          action14[11] += 0.15 * pushR - 0.08 * pushL;
+          action14[12] += 0.20 * pushR - 0.12 * pushL;
+          action14[13] += -0.10 * pushR + 0.06 * pushL;
+
+          // Smooth CoM weight transfer over the gliding skate + carve lean on turns
+          const turnLean = -Math.max(-0.35, Math.min(0.35, state.cmd.vyaw)) * 0.12;
+          state.pose.rollFall = -0.055 * s * strideAmp + turnLean;
+          state.pose.pitchFall = 0.04 * strideAmp;
+
+          // Vestibular head stabilization during inline glide
+          action14[5] += 0.16 * strideAmp;
+          action14[7] += state.cmd.vyaw * 0.25;
+          action14[8] += -state.pose.rollFall * 0.80;
         } else {
           const phase = state.time * 8.0;
           const swing = Math.min(0.32, speed * 0.72);
@@ -1651,17 +2092,25 @@
     duckWorldRoot.rotation.set(state.pose.rollFall, state.pose.yaw, -state.pose.pitchFall);
     shadowDisc.position.set(state.pose.x, 0.002, state.pose.z);
     shadowDisc.material.opacity = Math.max(0.12, 0.45 - state.pose.liftY * 1.5);
+    if (floorMat.uniforms && floorMat.uniforms.uFocus) {
+      floorMat.uniforms.uFocus.value.set(state.pose.x, 0, state.pose.z);
+    }
 
     if (state.activeMesh === "cad") {
-      applyJointsToCadGroups(cadBodyGroups, state.joints);
+      applyJointsToCadGroups(cadBodyGroups, state.joints, mouthOpen);
+      syncRollerFootVisibility();
       const showRoller = state.locomotionMode === "roller" || state.rollerSkatesForced;
-      for (let i = 0; i < rollerWheels.length; i++) {
-        const w = rollerWheels[i];
-        w.visible = showRoller;
-        if (showRoller) {
-          const moveSpeed = Math.abs(state.cmd.vx) > 0.005 ? state.cmd.vx : (speed > 0.01 ? speed : 0);
-          if (Math.abs(moveSpeed) > 0.005) {
-            w.rotateX(-(moveSpeed * dt) / Math.max(0.012, w.userData.radius || 0.015));
+      if (showRoller) {
+        const moveSpeed = Math.abs(state.cmd.vx) > 0.005 ? state.cmd.vx : (speed > 0.01 ? speed : 0);
+        if (Math.abs(moveSpeed) > 0.005) {
+          const dTheta = (moveSpeed * dt) / 0.015;
+          const spinQ = new THREE.Quaternion();
+          const zAxis = new THREE.Vector3(0, 0, 1);
+          for (let i = 0; i < rollerWheels.length; i++) {
+            const w = rollerWheels[i];
+            w.userData.wheelAngle = (w.userData.wheelAngle || 0) + dTheta;
+            spinQ.setFromAxisAngle(zAxis, w.userData.wheelAngle);
+            w.quaternion.copy(w.userData.baseQuat).multiply(spinQ);
           }
         }
       }
@@ -1936,12 +2385,15 @@
       }
     });
     if (skillStatusTag) {
-      skillStatusTag.textContent = state.locomotionMode === "walk" ? "velstand.onnx" : "roller.onnx";
+      skillStatusTag.textContent = state.activeSkill?.name === "roller_crouch"
+        ? "BEST_roller_crouch.onnx"
+        : (state.locomotionMode === "walk" ? "BEST_alpha_walking.onnx" : "BEST_roller.onnx");
     }
     const btnToggleRollerSkates = document.getElementById("btn-toggle-roller-skates");
     if (btnToggleRollerSkates) {
       btnToggleRollerSkates.classList.toggle("active", state.locomotionMode === "roller" || state.rollerSkatesForced);
     }
+    syncRollerFootVisibility();
   }
 
   function triggerSkill(name) {
@@ -1952,21 +2404,44 @@
       
       if (name === "roller") {
         state.rollerSkatesForced = true;
-        // If speed is 0, auto-engage forward speed so the user immediately sees the roller skating strides!
+        if (sliderVx) { sliderVx.min = "-0.50"; sliderVx.max = "0.60"; }
+        if (sliderVyaw) { sliderVyaw.min = "-0.30"; sliderVyaw.max = "0.30"; }
         if (Math.abs(state.cmd.vx) < 0.05) {
-          state.cmd.vx = 0.28;
-          if (sliderVx) sliderVx.value = 0.28;
-          if (valVx) valVx.textContent = "0.28 m/s";
+          state.cmd.vx = 0.36;
+          if (sliderVx) sliderVx.value = 0.36;
+          if (valVx) valVx.textContent = "0.36 m/s";
         }
-        pushLog("robotd", "Switched mode to Roller Skates (roller.onnx) - Dynamic leg push strides engaged.");
+        state.cmd.vyaw = Math.max(-0.30, Math.min(0.30, state.cmd.vyaw));
+        pushLog("robotd", "Switched to Inline Roller Blades (BEST_roller.onnx: RVEL_FWD=0.6m/s, RVEL_ANG=0.3rad/s).");
       } else {
-        pushLog("robotd", "Switched mode to Bipedal Walk (velstand.onnx) - Bipedal walking cycle engaged.");
+        state.rollerSkatesForced = false;
+        if (sliderVx) { sliderVx.min = "-0.30"; sliderVx.max = "0.45"; }
+        if (sliderVyaw) { sliderVyaw.min = "-1.20"; sliderVyaw.max = "1.20"; }
+        pushLog("robotd", "Switched to Bipedal Walk Feet (BEST_alpha_walking.onnx).");
       }
       updateLocomotionUi();
       playProceduralQuack(name === "walk" ? 1.0 : 1.25);
       return;
     }
+    if (name === "roller_crouch") {
+      if (state.locomotionMode !== "roller") {
+        triggerSkill("roller");
+      }
+      if (Math.abs(state.cmd.vx) < 0.15) {
+        state.cmd.vx = 0.42;
+        if (sliderVx) sliderVx.value = 0.42;
+        if (valVx) valVx.textContent = "0.42 m/s";
+      }
+      state.activeSkill = { name: "roller_crouch", elapsed: 0, duration: 3.5 };
+      updateLocomotionUi();
+      pushLog("robotd", "Triggered Crouch-Glide (BEST_roller_crouch.onnx: phase 0..0.7 over 3.5s).");
+      return;
+    }
     if (name === "sit_toggle") {
+      if (state.locomotionMode === "roller") {
+        triggerSkill("roller_crouch");
+        return;
+      }
       state.isSeated = !state.isSeated;
       state.isResting = false;
       pushLog("robotd", `sitstand.onnx -> ${state.isSeated ? "SEATED" : "STANDING"}`);
@@ -1979,6 +2454,7 @@
       roulade: 1.6,
       polite_bow: 3.0,
       flamingo: 3.5,
+      roller_crouch: 3.5,
     };
     state.activeSkill = { name, elapsed: 0, duration: durations[name] || 1.5 };
     pushLog("robotd", `robot.do "${name}" (${state.activeSkill.duration.toFixed(1)}s)`);
@@ -2118,8 +2594,9 @@
   if (btnToggleRollerSkates) {
     btnToggleRollerSkates.addEventListener("click", () => {
       state.rollerSkatesForced = !state.rollerSkatesForced;
-      btnToggleRollerSkates.classList.toggle("active", state.rollerSkatesForced);
-      pushLog("STL", `Roller Skates (V5_AUDIO_VIDEO_TIRE_01.stl) ${state.rollerSkatesForced ? "MOUNTED" : "AUTO (Roller mode only)"}`);
+      btnToggleRollerSkates.classList.toggle("active", state.locomotionMode === "roller" || state.rollerSkatesForced);
+      syncRollerFootVisibility();
+      pushLog("STL", `Inline Roller Blades (ankle_l/r_v1 + roller_blade + 4x tire/rim) ${state.rollerSkatesForced ? "MOUNTED" : "AUTO (Roller mode only)"}`);
     });
   }
 
@@ -2691,11 +3168,16 @@ function onStep(t, dt, duck) {
   window.addEventListener("keydown", (e) => {
     if (isEditableTarget(e.target)) return;
     const k = e.key.toLowerCase();
+    const isRoller = state.locomotionMode === "roller";
     if (k === "m") toggleMeshMode();
-    if (k === "w" || e.key === "ArrowUp") state.cmd.vx = 0.30;
-    if (k === "s" || e.key === "ArrowDown") state.cmd.vx = -0.20;
-    if (k === "a" || e.key === "ArrowLeft") state.cmd.vyaw = 0.80;
-    if (k === "d" || e.key === "ArrowRight") state.cmd.vyaw = -0.80;
+    if (k === "w" || e.key === "ArrowUp") state.cmd.vx = isRoller ? 0.60 : 0.30;
+    if (k === "s" || e.key === "ArrowDown") state.cmd.vx = isRoller ? -0.50 : -0.20;
+    if (k === "a" || e.key === "ArrowLeft") state.cmd.vyaw = isRoller ? 0.30 : 0.80;
+    if (k === "d" || e.key === "ArrowRight") state.cmd.vyaw = isRoller ? -0.30 : -0.80;
+    if (k === "r") {
+      if (isRoller) triggerSkill("roller_crouch");
+      else triggerSkill("sit_toggle");
+    }
     if (k === " ") {
       e.preventDefault();
       playProceduralQuack(1.0);

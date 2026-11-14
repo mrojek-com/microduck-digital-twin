@@ -35,6 +35,7 @@ xgoduck_hardware/
 
 # --- Upstream-Derived Runtime Assets (Generated locally by fetch_upstream_assets.sh) ---
 web/assets/models/
+web/assets/mjlab/
 web/assets/emotions/
 web/assets/policies/
 web/assets/scores/

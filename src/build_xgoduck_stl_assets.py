@@ -285,18 +285,57 @@ def main() -> None:
     catalog_path = MODELS_DIR / "xgoduck_stl_catalog.json"
     catalog_path.write_text(json.dumps(catalog, indent=2), encoding="utf-8")
 
-    # Emit synchronous JS bundle (`microduck_cad_bundle.js`) so the 3D CAD rig & V5 roller tires
-    # load in 0 ms on frame 1 even when `web/index.html` is opened directly via `file://`
+    # Emit synchronous JS bundle (`microduck_cad_bundle.js`) so the 3D CAD rig, MJLab kinematics,
+    # and inline roller-blade STLs load in 0 ms on frame 1 even when `web/index.html` is opened via `file://`
     rig_json_path = MODELS_DIR / "microduck_cad_rig.json"
     tire_json_path = MODELS_DIR / "xgoduck_v5_tire.json"
+    mjlab_dir = PROJECT_ROOT / "web" / "assets" / "mjlab"
     if rig_json_path.exists() and tire_json_path.exists():
+        bundle_parts = [
+            f"window.__MICRODUCK_CAD_RIG__ = {rig_json_path.read_text(encoding='utf-8').strip()};",
+            f"window.__MICRODUCK_V5_TIRE__ = {tire_json_path.read_text(encoding='utf-8').strip()};",
+        ]
+        kin_legs_path = mjlab_dir / "kinematics.json"
+        kin_rollers_path = mjlab_dir / "kinematics_rollers.json"
+        if kin_legs_path.exists():
+            kin_legs_min = json.dumps(json.loads(kin_legs_path.read_text(encoding="utf-8")), separators=(",", ":"))
+            bundle_parts.append(f"window.__MICRODUCK_KIN_LEGS__ = {kin_legs_min};")
+        if kin_rollers_path.exists():
+            kin_rollers_min = json.dumps(json.loads(kin_rollers_path.read_text(encoding="utf-8")), separators=(",", ":"))
+            bundle_parts.append(f"window.__MICRODUCK_KIN_ROLLERS__ = {kin_rollers_min};")
+
+        meshes_dir = mjlab_dir / "meshes"
+        roller_meshes = {}
+        for stl_name in ["ankle_l_v1.stl", "ankle_r_v1.stl", "roller_blade.stl", "rim.stl", "tire.stl"]:
+            stl_p = meshes_dir / stl_name
+            if stl_p.exists():
+                data = stl_p.read_bytes()
+                n_tris = struct.unpack_from("<I", data, 80)[0]
+                offset = 84
+                vert_map = {}
+                verts = []
+                tris = []
+                for _ in range(n_tris):
+                    floats = struct.unpack_from("<12fH", data, offset)
+                    offset += 50
+                    tri = []
+                    for vi in range(3):
+                        vx, vy, vz = floats[3 + vi * 3 : 6 + vi * 3]
+                        key = (round(vx * 10000), round(vy * 10000), round(vz * 10000))
+                        idx = vert_map.get(key)
+                        if idx is None:
+                            idx = len(verts)
+                            vert_map[key] = idx
+                            verts.append([round(vx, 5), round(vy, 5), round(vz, 5)])
+                        tri.append(idx)
+                    tris.append(tri)
+                roller_meshes[stl_name] = {"verts": verts, "tris": tris}
+        if roller_meshes:
+            bundle_parts.append(f"window.__MICRODUCK_ROLLER_MESHES__ = {json.dumps(roller_meshes, separators=(',', ':'))};")
+
         bundle_js = MODELS_DIR / "microduck_cad_bundle.js"
-        bundle_js.write_text(
-            f"window.__MICRODUCK_CAD_RIG__ = {rig_json_path.read_text(encoding='utf-8').strip()};\n"
-            f"window.__MICRODUCK_V5_TIRE__ = {tire_json_path.read_text(encoding='utf-8').strip()};\n",
-            encoding="utf-8",
-        )
-        print(f"[✓] Synchronous CAD + Tire JS bundle: {bundle_js.relative_to(PROJECT_ROOT)} ({bundle_js.stat().st_size // 1024} KB)")
+        bundle_js.write_text("\n".join(bundle_parts) + "\n", encoding="utf-8")
+        print(f"[✓] Synchronous CAD + Inline Roller JS bundle: {bundle_js.relative_to(PROJECT_ROOT)} ({bundle_js.stat().st_size // 1024} KB)")
 
     print(f"[✓] Cataloged {catalog['summary']['total_stl_count']} real STLs ({len(v2_entries)} V2 + {len(v5_entries)} V5)")
     print(f"[✓] Real CAD slicer STL: {slicer_info['path']} ({slicer_info['faces']} tris, extents {slicer_info['extents_mm']} mm)")

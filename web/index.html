@@ -88,6 +88,7 @@
         <div class="btn-grid-3" style="margin-bottom:8px;">
           <button class="btn btn-primary" data-skill="walk" data-info="subsys-walk" type="button">Walk</button>
           <button class="btn" data-skill="roller" data-info="subsys-roller" type="button">Roller</button>
+          <button class="btn" data-skill="roller_crouch" data-info="subsys-roller" type="button">Crouch Glide</button>
           <button class="btn" data-skill="sit_toggle" data-info="subsys-sit" type="button">A: Sit/Stand</button>
           <button class="btn" data-skill="ground_pick" data-info="subsys-pick" type="button">B: Pick</button>
           <button class="btn" data-skill="kick_left" data-info="subsys-kick" type="button">Kick Left</button>
@@ -152,13 +153,13 @@
             <div class="hud-chip-group">
               <button id="btn-toggle-mesh" class="hud-chip active" data-info="subsys-viewport" type="button">[M] Rig: Articulated CAD (duck.bin)</button>
               <select id="select-colorway" class="hud-chip" data-info="subsys-colorway" aria-label="Hardware Colorway" style="width:auto; max-width:260px; background:rgba(15,23,42,0.9); color:var(--text); border:1px solid rgba(148,163,184,0.35); cursor:pointer;">
-                <option value="white_orange" selected>Colorway: Classic White &amp; Orange</option>
-                <option value="sky_blue">Colorway: Sky Blue &amp; Orange</option>
-                <option value="lavender_yellow">Colorway: Lavender &amp; Cyan</option>
-                <option value="slate_purple">Colorway: Stealth Slate &amp; Purple</option>
+                <option value="white_orange" selected>Colorway: Cream (Classic White &amp; Orange)</option>
+                <option value="sky_blue">Colorway: Sky (Light Blue &amp; Orange)</option>
+                <option value="lavender_yellow">Colorway: Lavender (Purple &amp; Yellow)</option>
+                <option value="slate_purple">Colorway: Graphite (Charcoal &amp; Yellow)</option>
                 <option value="cad_raw">Colorway: Raw CAD (duck.bin)</option>
               </select>
-              <button id="btn-toggle-roller-skates" class="hud-chip" data-info="subsys-roller" type="button">Roller Skates (V5 STL)</button>
+              <button id="btn-toggle-roller-skates" class="hud-chip" data-info="subsys-roller" type="button">Inline Roller Blades</button>
               <button id="btn-toggle-tof-rays" class="hud-chip active" data-info="subsys-tof" type="button">8×8 ToF Rays</button>
               <button id="btn-mode-autod" class="hud-chip" data-info="subsys-autod" type="button">autod Brain</button>
               <button id="btn-mode-laser" class="hud-chip" data-info="subsys-laser" type="button">Laser Chase</button>
@@ -463,7 +464,7 @@
     </div>
   </div>
 
-  <script src="assets/models/microduck_cad_bundle.js"></script>
-  <script src="simulator.js?v=0.3.9"></script>
+  <script src="assets/models/microduck_cad_bundle.js?v=0.4.0"></script>
+  <script src="simulator.js?v=0.4.0"></script>
 </body>
 </html>
