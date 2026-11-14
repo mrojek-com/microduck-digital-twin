@@ -1775,12 +1775,12 @@
       case "ground_pick": {
         const squat = pulse(0.0, 0.28, 0.68, 1.0, p);
         const peck = pulse(0.18, 0.42, 0.65, 0.90, p);
-        pose.liftY = -0.040 * squat;
-        pose.pitchFall = 0.32 * peck; // Torso leans forward toward floor
-        // Hip flex forward (-0.26), knee bend (+0.52), ankle trim (+0.78 keeps soles 100% flat)
-        bothLegs(-0.26 * squat, 0.52 * squat, 0.78 * squat);
-        a[5] = -0.92 * peck; // Neck dips forward-down toward floor (negative = forward)
-        a[6] = -0.48 * peck; // Head angles down so beak points straight at target on floor
+        pose.liftY = -0.018 * squat;
+        pose.pitchFall = 0.0; // Stance feet remain locked flat on floor (never tilt rigid world root)
+        // Flat-sole squat (da = dk - dh keeps soles 100% flat on the floor)
+        bothLegs(-0.20 * squat, 0.40 * squat, 0.60 * squat);
+        a[5] = -1.15 * peck; // Neck dips forward-down toward floor (negative = forward)
+        a[6] = -0.55 * peck; // Head angles down so beak points straight at target on floor
         // Open beak on approach (phase 0.2..0.45), snap shut on ground scoop (phase 0.45..0.58)
         cmd.mouthOpen = ss(0.20, 0.40, p) * (1 - ss(0.46, 0.58, p));
         break;
@@ -1922,7 +1922,7 @@
     } else {
       state.pose.pitchFall *= 0.85;
       state.pose.rollFall *= 0.85;
-      state.pose.liftY += ((state.isSeated ? -0.011 : 0.0) - state.pose.liftY) * 0.15;
+      state.pose.liftY += ((state.isSeated ? -0.032 : 0.0) - state.pose.liftY) * 0.15;
 
       // Walking / Roller locomotion cycle
       if (!state.isSeated && speed > 0.01) {
@@ -2002,16 +2002,14 @@
         state.vetbook.metersWalked += Math.hypot(dx, dz);
       }
 
-      // Seated posture (folds knees back under body, splays hips neatly, and settles trunk on floor)
+      // Seated posture (authentic flat-sole sit squat: both soles 100% flat on floor, knees forward)
       if (state.isSeated) {
-        action14[1] = 0.24;
-        action14[2] = -0.35;
-        action14[3] = 1.25;
-        action14[4] = -0.65;
-        action14[10] = -0.24;
-        action14[11] = 0.35;
-        action14[12] = -1.25;
-        action14[13] = 0.65;
+        action14[2] = -0.38;
+        action14[3] = 0.76;
+        action14[4] = 1.14;
+        action14[11] = 0.38;
+        action14[12] = -0.76;
+        action14[13] = -1.14;
       }
 
       // Active one-shot skill overlay (Claude Endgegner Physics-Grounded Kinematics)
