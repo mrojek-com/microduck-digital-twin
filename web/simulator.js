@@ -503,7 +503,6 @@
   const duckCadContainer = new THREE.Group();
   duckCadContainer.rotation.x = -Math.PI / 2;
   duckWorldRoot.add(duckCadContainer);
-  const _cadFloorBox = new THREE.Box3();
 
   // FLUX AI Mesh Container
   const fluxAiContainer = new THREE.Group();
@@ -1901,7 +1900,7 @@
       for (let i = 0; i < 15; i++) {
         state.joints[i] += (REST_POSITION[i] - state.joints[i]) * 0.12;
       }
-      state.pose.liftY += (-0.055 - state.pose.liftY) * 0.12;
+      state.pose.liftY += (-0.026 - state.pose.liftY) * 0.12;
     } else if (state.isPickedUp) {
       state.pickupElapsed += dt;
       const t = Math.min(1, state.pickupElapsed / 0.30);
@@ -1923,7 +1922,7 @@
     } else {
       state.pose.pitchFall *= 0.85;
       state.pose.rollFall *= 0.85;
-      state.pose.liftY += ((state.isSeated ? -0.05 : 0.0) - state.pose.liftY) * 0.15;
+      state.pose.liftY += ((state.isSeated ? -0.011 : 0.0) - state.pose.liftY) * 0.15;
 
       // Walking / Roller locomotion cycle
       if (!state.isSeated && speed > 0.01) {
@@ -2122,11 +2121,6 @@
     if (state.activeMesh === "cad") {
       applyJointsToCadGroups(cadBodyGroups, state.joints, mouthOpen);
       syncRollerFootVisibility();
-      duckCadContainer.updateMatrixWorld(true);
-      _cadFloorBox.setFromObject(duckCadContainer);
-      if (_cadFloorBox.min.y < 0.0005) {
-        duckWorldRoot.position.y += (0.0005 - _cadFloorBox.min.y);
-      }
       const showRoller = state.locomotionMode === "roller" || state.rollerSkatesForced;
       if (showRoller) {
         const moveSpeed = Math.abs(state.cmd.vx) > 0.005 ? state.cmd.vx : (speed > 0.01 ? speed : 0);
