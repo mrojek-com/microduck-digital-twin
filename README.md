@@ -21,13 +21,23 @@ An interactive **50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Sim
 1. **Articulated 15-DOF SE(3) CAD Rig & Hardware Shell Visualizer**
    - Real-time forward kinematics across all 15 robot bodies (`left/right hip_yaw, hip_roll, hip_pitch, knee, ankle`, `neck_pitch`, `head_pitch, head_yaw, head_roll`, and `mouth`).
    - Supports 5 authentic hardware shell colorways (*Cream White + Orange Beak*, *Sky Blue V5*, *Lavender Purple*, *Slate Tactical*, and *Raw CAD*).
-   - Optional ankle-mounted roller-skate wheel assembly (`V5_AUDIO_VIDEO_TIRE_01.stl`) for `roller` locomotion mode.
+   - Ankle-mounted polyurethane roller-skate wheel assembly (`V5_AUDIO_VIDEO_TIRE_01.stl`) with a $5.2\text{ Hz}$ speed-skater crouch, alternating lateral leg push-off strides, and synchronized wheel rotation in `roller` locomotion mode.
+   - Interactive **Subsystem Inspector HUD Bar** and glassmorphic hover tooltips explaining every control, sensor, policy, and safety subsystem.
 
-2. **Live Motion Lab, Python/JS REPL & AI Motion Copilot**
-   - Live in-browser 50 Hz execution engine: paste Python or JavaScript kinematic routines directly into the simulator to test new behaviors in real time without flashing or breaking hardware.
-   - Clean, tactile `duck` API (`duck.setJoint`, `duck.setMouth`, `duck.setTwist`, `duck.setHead`, `duck.readTof`, `duck.playQuack`, `duck.applyImpulse`).
-   - 4 built-in motion presets (*Drunken Sailor Wobble*, *ToF Theremin Beatbox*, *Self-Righting Acrobat*, *Laser Dot Tracking*).
-   - Integrated AI Motion Copilot bar that queries local Ollama (`qwen3:30b-a3b`) to synthesize motion routines on the fly.
+2. **50 Hz Closed-Loop Code Lab, Sim-to-Real Gap Injector & AI Controller Synthesizer**
+   - Live in-browser 50 Hz closed-loop execution engine (`⌘/Ctrl + Enter` hot-swap): write JavaScript (`function onStep(t, dt, duck)`) or multi-branch Python (`def on_step(t, dt, duck):` via an indentation-aware transpiler) to test feedback controllers in real time.
+   - Ground-truth closed-loop `duck` API:
+     - **Sensors & State:** `duck.readImu()`, `duck.readTarget()` (pose, SE(2) laser dot & soccer ball bearing/distance), `duck.readTof()`, `duck.readJoints()`, `duck.readObs61()`.
+     - **Actuation & Recovery:** `duck.setJointOffset(name, deltaRad)`, `duck.setJoint(name, absRad)`, `duck.setTwist(vx, vyaw, vy)`, `duck.setHead(yaw, pitch, roll)`, `duck.setMouth(ratio)`, `duck.setMode('walk'|'roller')`, `duck.doSkill(name)`, `duck.recover()`, `duck.playQuack()`, `duck.applyImpulse(rad_s)`.
+     - **Live Telemetry & Assertions:** `duck.watch(key, val)` (or `return { key: val }`) and `duck.assert(cond, label)` streaming into the **50 Hz Hardware Contract & Watch Strip** (per-tick execution budget in ms, range/NaN/slew clamp counters, and live variable pills).
+   - **Sim-to-Real Reality-Gap Injector:** Toggle live between **Ideal (`0ms`)**, **Nominal (`+20ms` 1-tick IMU delay, $\sigma = 0.02\text{ rad}$ Gaussian noise)**, and **Harsh (`+40ms` 2-tick delay, $\sigma = 0.055\text{ rad}$, XL330 $8.5\text{ rad/s}$ servo slew-rate cap)**.
+   - **5 Built-in Closed-Loop Controller Presets:**
+     1. *Closed-Loop IMU PD Balance & Push Reflex* (`pd_reflex`)
+     2. *SE(2) Laser Visual Servoing* (`laser_servo`)
+     3. *Autonomous Soccer Striker FSM* (`soccer_fsm`)
+     4. *VL53L5CX ToF Repulsion & Theremin* (`tof_beatbox`)
+     5. *Python: Figure-8 Roller Skate CPG Carver* (`python_style`)
+   - **AI Controller Synthesizer:** Queries local Ollama (`qwen3:30b-a3b`) when available, with an instant offline intent-aware compositional controller synthesizer fallback.
 
 3. **50 Hz Control Loop (`dt = 0.02 s`) & 61-D Observation Inspector**
    - Faithfully models the 61-dimensional policy observation vector (`gyro[3]`, `gravity[3]`, `joint_pos_err[14]`, `joint_vel[14]`, `prev_action[14]`, `cmd_twist[3]`, `cmd_head[4]`, `pad[2]`, `cmd_body[3]`, `pad[1]`) while excluding beak actuator index `9` (`mouth`) from closed-loop locomotion feedback.
@@ -111,7 +121,7 @@ bash run_tests.sh
 │   ├── extract_ground_truth.py      # Extracts CAD rig, MJCF, emotions & ONNX from upstream
 │   └── build_xgoduck_stl_assets.py  # Catalogs & converts XGO-Duck V2/V5 STL hardware shells
 ├── tests/
-│   └── test_microduck_sim.py        # 9 deterministic unit & adversarial NaN/safety tests
+│   └── test_microduck_sim.py        # 10 deterministic unit, closed-loop & adversarial NaN/safety tests
 ├── docs/
 │   └── CHEATSHEET_MASTER_GUIDE.md   # Deep architectural & hardware reference guide
 └── web/
