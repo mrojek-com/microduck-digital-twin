@@ -881,6 +881,9 @@
     const showRoller = state.locomotionMode === "roller" || state.rollerSkatesForced;
     walkingFootMeshes.forEach((m) => { m.visible = !showRoller; });
     inlineRollerMeshes.forEach((m) => { m.visible = showRoller; });
+    const baseFootOffset = cadRigData && cadRigData.home_pose_stats ? cadRigData.home_pose_stats.foot_offset_y : 0;
+    // `robot_allcollisions_rollers.xml` home trunk height is z=0.149m vs z=0.120m (+0.029m for 30mm inline wheels)
+    duckCadContainer.position.y = baseFootOffset + (showRoller ? 0.029 : 0.0);
   }
 
   // True RANSAC-fitted physical jaw hinge pivot (`JAW_HINGE_LOCAL = [0, 0.00004, 0.0075]` in jaw.stl -> `[0.0030, 0, -0.01796]` in body 9)
@@ -1760,19 +1763,20 @@
       case "polite_bow": {
         const cush = pulse(0.0, 0.2, 0.8, 1.0, p);
         const bow = pulse(0.15, 0.45, 0.62, 0.9, p);
-        bothLegs(-0.1 * cush, 0.2 * cush, -0.1 * cush);
+        // Flat-sole crouch: dh = +c, dk = +2*c, da = dk - dh = +c
+        bothLegs(0.12 * cush, 0.24 * cush, 0.12 * cush);
+        pose.liftY = -0.008 * cush;
         a[5] = 0.7 * bow;
         a[6] = 0.45 * bow;
-        pose.pitchFall = 0.04 * bow;
         cmd.mouthOpen = 0.25 * pulse(0.4, 0.5, 0.6, 0.75, p);
         break;
       }
       case "ground_pick": {
         const squat = pulse(0.0, 0.3, 0.7, 1.0, p);
         const neck = pulse(0.2, 0.45, 0.7, 0.92, p);
-        pose.liftY = -0.04 * squat;
-        bothLegs(-0.35 * squat, 0.7 * squat, -0.35 * squat);
-        pose.pitchFall = 0.06 * squat;
+        pose.liftY = -0.025 * squat;
+        // Flat-sole squat: dh = +0.42*squat, dk = +0.84*squat, da = dk - dh = +0.42*squat
+        bothLegs(0.42 * squat, 0.84 * squat, 0.42 * squat);
         a[5] = 0.9 * neck;
         a[6] = 0.5 * neck;
         cmd.mouthOpen = ss(0.46, 0.5, p) * (1 - ss(0.5, 0.56, p));
@@ -1786,9 +1790,9 @@
         const tuck = ss(0.2, 0.36, p) * (1 - ss(0.72, 0.85, p));
         const reach = ss(0.72, 0.85, p) * (1 - ss(0.92, 1.0, p));
 
-        const hip = -0.5 * crouch - 1.4 * tuck - 0.25 * reach;
-        const knee = 1.0 * crouch + 2.0 * tuck + 0.08 * reach;
-        const ankle = -0.5 * crouch + 0.5 * tuck - 0.1 * reach;
+        const hip = 0.4 * crouch + 1.1 * tuck + 0.2 * reach;
+        const knee = 0.8 * crouch + 1.8 * tuck + 0.4 * reach;
+        const ankle = knee - hip;
         bothLegs(hip, knee, ankle);
 
         a[5] = 0.3 * crouch + 0.6 * tuck;
@@ -1797,15 +1801,16 @@
       }
       case "roller_crouch": {
         // Phase-encoded Crouch-Glide (`BEST_roller_crouch.onnx`: CROUCH_PERIOD_S=5.0s, CROUCH_END_PHASE=0.7 -> 3.5s)
-        // Sinks smoothly into a low aerodynamic speed-skater tuck while gliding on all 4 inline wheels, then rises cleanly.
+        // Exact flat-blade kinematic invariant: dh = +c, dk = +2*c, da = dk - dh = +c keeps all 4 inline wheels at 0.000m tilt!
         const dip = pulse(0.0, 0.26, 0.68, 0.98, p);
-        const carve = Math.sin(p * Math.PI * 2.0) * 0.06 * dip;
-        pose.liftY = -0.048 * dip;
-        pose.pitchFall = 0.11 * dip;
+        const carve = Math.sin(p * Math.PI * 2.0) * 0.045 * dip;
+        const c = 0.48 * dip;
+        pose.liftY = -0.026 * dip;
+        pose.pitchFall = 0;
         pose.rollFall = carve;
-        bothLegs(-0.52 * dip, 1.04 * dip, -0.52 * dip);
-        a[1] = -carve * 0.8;
-        a[10] = -carve * 0.8;
+        bothLegs(c, 2.0 * c, c);
+        a[1] = carve * 0.6;
+        a[10] = carve * 0.6;
         a[5] = 0.38 * dip; // Neck tucked forward
         a[6] = -0.18 * dip; // Gaze level ahead
         a[8] = -carve * 0.7;
@@ -1921,45 +1926,44 @@
         if (state.locomotionMode === "roller") {
           // Authentic Inline Roller Skating Stride (`BEST_roller.onnx` velocity envelope:
           // RVEL_FWD = 0.60 m/s, RVEL_BACK = -0.50 m/s, RVEL_ANG = 0.30 rad/s)
-          const skateFreq = 4.6;
+          // Universal Flat-Blade Law: in kinematics.json, left hip_pitch (+Y), knee (-Y), ankle (+Y) => da_L = dk_L - dh_L
+          // and right hip_pitch (-Y), knee (+Y), ankle (-Y) => da_R = dk_R - dh_R keeps all 4 wheels 100% flat on the floor!
+          const skateFreq = 3.8;
           const phase = state.time * skateFreq;
           const s = Math.sin(phase);
-          const strideAmp = Math.min(1.0, speed * 2.4);
+          const strideAmp = Math.min(1.0, speed * 2.2);
 
-          // Balanced inline-skate knee bend & ankle trim
-          const crouch = 0.22;
-          action14[2] = -crouch;
-          action14[3] = crouch * 1.85;
-          action14[4] = -crouch * 0.85;
-          action14[11] = crouch;
-          action14[12] = -crouch * 1.85;
-          action14[13] = crouch * 0.85;
-
-          // Smooth alternating V-push & long inline glide:
+          const crouch = 0.16 * strideAmp;
           const pushL = Math.max(0, s) * strideAmp;
           const pushR = Math.max(0, -s) * strideAmp;
 
-          // Left inline skate push & glide
-          action14[0] = -0.10 * pushL + 0.05 * pushR;  // Slight V-skate toe-out on push
-          action14[1] = -0.19 * pushL + 0.05 * pushR;  // Lateral inline edge push
-          action14[2] += -0.15 * pushL + 0.08 * pushR;
-          action14[3] += -0.20 * pushL + 0.12 * pushR;
-          action14[4] += 0.10 * pushL - 0.06 * pushR;
+          // Left inline skate: outward V-push (+left_hip_roll = +Y outward, +left_hip_pitch = -X backward stroke)
+          const dhL = crouch + 0.22 * pushL - 0.10 * pushR;
+          const dkL = 2.0 * crouch + 0.12 * pushL;
+          action14[0] = -0.14 * pushL;
+          action14[1] = 0.14 * pushL - 0.04 * pushR;
+          action14[2] = dhL;
+          action14[3] = dkL;
+          action14[4] = dkL - dhL;
 
-          // Right inline skate push & glide (mirrored pitch signs)
-          action14[9]  = 0.10 * pushR - 0.05 * pushL;
-          action14[10] = 0.19 * pushR - 0.05 * pushL;
-          action14[11] += 0.15 * pushR - 0.08 * pushL;
-          action14[12] += 0.20 * pushR - 0.12 * pushL;
-          action14[13] += -0.10 * pushR + 0.06 * pushL;
+          // Right inline skate: outward V-push (-right_hip_roll = -Y outward, -right_hip_pitch = -X backward stroke)
+          const dhR = -crouch - 0.22 * pushR + 0.10 * pushL;
+          const dkR = -2.0 * crouch - 0.12 * pushR;
+          action14[9]  = 0.14 * pushR;
+          action14[10] = -0.14 * pushR + 0.04 * pushL;
+          action14[11] = dhR;
+          action14[12] = dkR;
+          action14[13] = dkR - dhR;
 
           // Smooth CoM weight transfer over the gliding skate + carve lean on turns
-          const turnLean = -Math.max(-0.35, Math.min(0.35, state.cmd.vyaw)) * 0.12;
-          state.pose.rollFall = -0.055 * s * strideAmp + turnLean;
-          state.pose.pitchFall = 0.04 * strideAmp;
+          const turnLean = -Math.max(-0.35, Math.min(0.35, state.cmd.vyaw)) * 0.10;
+          state.pose.rollFall = -0.035 * s * strideAmp + turnLean;
+          state.pose.pitchFall = 0;
+          state.pose.liftY = -0.008 * strideAmp;
 
           // Vestibular head stabilization during inline glide
-          action14[5] += 0.16 * strideAmp;
+          action14[5] += 0.18 * strideAmp;
+          action14[6] += -0.08 * strideAmp;
           action14[7] += state.cmd.vyaw * 0.25;
           action14[8] += -state.pose.rollFall * 0.80;
         } else {
@@ -1967,17 +1971,21 @@
           const swing = Math.min(0.32, speed * 0.72);
           const s = Math.sin(phase);
           const c = Math.cos(phase);
+          const dhL = swing * s;
+          const dkL = Math.max(0, -swing * c) * 1.10;
           action14[0] = state.cmd.vyaw * 0.16 * s;
           action14[1] = state.cmd.vy * 0.25 + 0.055 * c;
-          action14[2] = swing * s;
-          action14[3] = Math.max(0, -swing * c) * 1.15;
-          action14[4] = -0.5 * swing * s;
+          action14[2] = dhL;
+          action14[3] = dkL;
+          action14[4] = dkL - dhL;
 
+          const dhR = swing * s;
+          const dkR = -Math.max(0, swing * c) * 1.10;
           action14[9] = -state.cmd.vyaw * 0.16 * s;
           action14[10] = state.cmd.vy * 0.25 - 0.055 * c;
-          action14[11] = swing * s;
-          action14[12] = -Math.max(0, swing * c) * 1.15;
-          action14[13] = -0.5 * swing * s;
+          action14[11] = dhR;
+          action14[12] = dkR;
+          action14[13] = dkR - dhR;
         }
 
         // Update world odometry
@@ -1991,14 +1999,14 @@
         state.vetbook.metersWalked += Math.hypot(dx, dz);
       }
 
-      // Seated posture
+      // Seated posture (flat-sole knee bend: dh = +0.52, dk = +1.04, da = dk - dh = +0.52)
       if (state.isSeated) {
-        action14[2] = -0.35;
-        action14[3] = 1.25;
-        action14[4] = -0.65;
-        action14[11] = 0.35;
-        action14[12] = -1.25;
-        action14[13] = 0.65;
+        action14[2] = 0.52;
+        action14[3] = 1.04;
+        action14[4] = 0.52;
+        action14[11] = -0.52;
+        action14[12] = -1.04;
+        action14[13] = -0.52;
       }
 
       // Active one-shot skill overlay (Claude Endgegner Physics-Grounded Kinematics)
@@ -2093,8 +2101,9 @@
     state.obs61[60] = 0;
     state.prevAction14 = [...action14];
 
-    // Update Three.js transforms
+    // Update Three.js transforms (use "YXZ" Euler order so yaw never swaps roll/pitch axes)
     duckWorldRoot.position.set(state.pose.x, state.pose.liftY, state.pose.z);
+    duckWorldRoot.rotation.order = "YXZ";
     duckWorldRoot.rotation.set(state.pose.rollFall, state.pose.yaw, -state.pose.pitchFall);
     shadowDisc.position.set(state.pose.x, 0.002, state.pose.z);
     shadowDisc.material.opacity = Math.max(0.12, 0.45 - state.pose.liftY * 1.5);
@@ -3683,6 +3692,18 @@ function onStep(t, dt, duck) {
 
   setupSubsystemInspector();
   updateLocomotionUi();
+
+  // Optional URL query-param boot hooks for Dev & QA testing (`?mode=roller&vx=0.35&mouth=1.0&skill=roller_crouch`)
+  try {
+    const qp = new URLSearchParams(window.location.search);
+    if (qp.get("mode") === "roller") {
+      state.locomotionMode = "roller";
+      updateLocomotionUi();
+    }
+    if (qp.has("vx")) state.cmd.vx = Number(qp.get("vx")) || 0;
+    if (qp.has("mouth")) state.cmd.mouthOpen = Number(qp.get("mouth")) || 0;
+    if (qp.has("skill")) duckApi.doSkill(qp.get("skill"));
+  } catch {}
 
   pushLog("init", "MicroDuck 50 Hz Digital Twin initialized.");
   requestAnimationFrame(animate);
