@@ -927,13 +927,16 @@
       return ss(r0, r1, x) * (1 - ss(f0, f1, x));
     }
     function bothLegs(hip, knee, ankle) {
-      a[2] = hip;  a[3] = knee;  a[4] = ankle;
-      a[11] = hip; a[12] = knee; a[13] = ankle;
+      // Right leg pitch joints are mirrored in CAD (DEFAULT_POSITION left=-0.4579, right=+0.4579)
+      a[2] = hip;   a[3] = knee;   a[4] = ankle;
+      a[11] = -hip; a[12] = -knee; a[13] = -ankle;
     }
 
     function kick(s) {
       const sw = s > 0 ? 0 : 9;
       const sp = s > 0 ? 9 : 0;
+      const swDir = sw === 0 ? 1 : -1;
+      const spDir = sp === 0 ? 1 : -1;
 
       const lean = pulse(0.0, 0.25, 0.78, 1.0, p);
       const wind = ss(0.25, 0.45, p);
@@ -945,15 +948,15 @@
       const toe = -0.3 * whip * (1 - ss(0.68, 0.9, p));
 
       a[sw + 1] = s * 0.08 * lean;
-      a[sw + 2] = hip;
-      a[sw + 3] = knee;
-      a[sw + 4] = toe;
+      a[sw + 2] = swDir * hip;
+      a[sw + 3] = swDir * knee;
+      a[sw + 4] = swDir * toe;
 
       const cushion = lean * (0.6 + 0.4 * pulse(0.4, 0.5, 0.6, 0.8, p));
       a[sp + 1] = s * 0.15 * lean;
-      a[sp + 2] = -0.07 * cushion;
-      a[sp + 3] = 0.15 * cushion;
-      a[sp + 4] = -0.07 * cushion;
+      a[sp + 2] = spDir * (-0.07 * cushion);
+      a[sp + 3] = spDir * (0.15 * cushion);
+      a[sp + 4] = spDir * (-0.07 * cushion);
 
       pose.rollFall = s * 0.12 * lean;
       pose.pitchFall = -0.06 * pulse(0.4, 0.52, 0.62, 0.8, p);
@@ -984,9 +987,9 @@
 
         const touch = Math.sin(Math.PI * clamp01((p - 0.82) / 0.16)) * (p > 0.82 ? 1 : 0);
         const sup = 0.5 * shift;
-        a[11] = -0.05 * sup - 0.04 * touch;
-        a[12] = 0.1 * sup + 0.1 * touch;
-        a[13] = -0.05 * sup - 0.04 * touch;
+        a[11] = 0.05 * sup + 0.04 * touch;
+        a[12] = -0.1 * sup - 0.1 * touch;
+        a[13] = 0.05 * sup + 0.04 * touch;
         a[6] = 0.05 * lift;
         break;
       }
@@ -2212,6 +2215,48 @@ function onStep(t, dt, duck) {
       title: "Autonomous Soccer Striker",
       text: "Perception and path planning loop: locates the ball, aligns approach heading, dribbles, and executes a dynamic kick into the goal area.",
       facts: ["Ball Seeking", "Approach Alignment", "Auto-Kick Trigger"]
+    },
+    "subsys-gamepad": {
+      badge: "PILOT INPUT",
+      tone: "cyan",
+      title: "Virtual Gamepad & Twist Sliders",
+      text: "Manual 50 Hz command interface for forward/strafe/yaw velocity (vx, vy, vyaw), neck/head orientation, and beak aperture. Also supports WASD / Arrow keys.",
+      facts: ["WASD / Arrows", "SE(3) Velocity", "Beak Control"]
+    },
+    "subsys-quack": {
+      badge: "AUDIO SYNTH",
+      tone: "amber",
+      title: "Procedural Formant Quack Synthesizer",
+      text: "Real-time WebAudio formant synthesis generating expressive duck quacks synchronized with beak opening and pitch modulation.",
+      facts: ["WebAudio API", "Formant Filter", "Beak Sync"]
+    },
+    "subsys-flux": {
+      badge: "3D & STUDIO",
+      tone: "violet",
+      title: "FLUX.1 Gallery & 97-Part STL Browser",
+      text: "Inspect official V2/V5 3D-printable STL components from LuwuDynamics/xgoduck_hardware alongside local FLUX.1 hardware colorway renders.",
+      facts: ["97 Printable STLs", "V2 & V5 Kits", "FLUX.1 Renders"]
+    },
+    "subsys-cheatsheet": {
+      badge: "DOCS",
+      tone: "cyan",
+      title: "Master Architecture Cheat Sheet",
+      text: "Complete technical reference covering 15-DOF joint indices, 61-D observation layout, XL330 UART IDs, and safety invariants.",
+      facts: ["15-DOF Map", "61-D Layout", "Safety Spec"]
+    },
+    "subsys-vetbook": {
+      badge: "HEALTH LOG",
+      tone: "green",
+      title: "VetBook Telemetry & Diagnostics",
+      text: "Tracks cumulative meters walked/skated, kicks, quacks, pickups, falls, and Impact Guard diagnostic health across the session.",
+      facts: ["Session Metrics", "Fall Counter", "Health Score"]
+    },
+    "subsys-codelab": {
+      badge: "50 HZ REPL",
+      tone: "cyan",
+      title: "Live Code Lab & AI Motion Copilot",
+      text: "Execute custom JavaScript or Python-style kinematic routines at 50 Hz directly in the browser, or prompt the local LLM to generate new behaviors.",
+      facts: ["50 Hz onStep()", "duck.* API", "Local AI Copilot"]
     }
   };
 
@@ -2254,7 +2299,13 @@ function onStep(t, dt, duck) {
       ["#obs-canvas", "subsys-obs61"],
       ["#joints-tbody, .joints-table", "subsys-joints"],
       ["#btn-chorale, #btn-chorale-stop", "subsys-choreo"],
-      [".telemetry-card, .header-badges", "subsys-telemetry"]
+      [".telemetry-card, .header-badges", "subsys-telemetry"],
+      ["[data-dpad], #slider-vx, #slider-vy, #slider-vyaw, #slider-head-yaw, #slider-head-pitch, #slider-mouth", "subsys-gamepad"],
+      ["#btn-quack", "subsys-quack"],
+      ["#btn-open-flux", "subsys-flux"],
+      ["#btn-open-cheat", "subsys-cheatsheet"],
+      ["#btn-open-vetbook", "subsys-vetbook"],
+      ["#select-code-preset, #btn-load-preset, #btn-run-code, #btn-stop-code, #ai-prompt-input, #btn-ai-generate", "subsys-codelab"]
     ];
 
     TAG_MAP.forEach(([sel, key]) => {

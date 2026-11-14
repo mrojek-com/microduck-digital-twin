@@ -797,3 +797,31 @@ select {
 button[data-info], select[data-info], input[data-info] {
   cursor: pointer;
 }
+
+/* UI Polish: Prevent chip wrapping, improve HUD readability & inline code badges */
+.hud-chip {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#hud-pose-readout {
+  background: rgba(11, 15, 23, 0.78);
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.card-header h2 code {
+  font-family: var(--mono);
+  font-size: 0.78em;
+  text-transform: none;
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.10);
+  padding: 1px 5px;
+  border-radius: 4px;
+}

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>MicroDuck — Bipedal Digital Twin</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=0.3.6">
+  <link rel="stylesheet" href="styles.css?v=0.3.7">
   <script src="vendor/three.min.js"></script>
   <script src="vendor/GLTFLoader.js"></script>
   <script src="vendor/OrbitControls.js"></script>
@@ -82,7 +82,7 @@
 
       <article class="card">
         <div class="card-header">
-          <h2>Policies &amp; Skills (`robot.do`)</h2>
+          <h2>Policies &amp; Skills (<code>robot.do</code>)</h2>
           <span id="skill-status-tag" class="mono-tag">velstand.onnx</span>
         </div>
         <div class="btn-grid-3" style="margin-bottom:8px;">
@@ -221,15 +221,15 @@
 
         <div class="code-editor-wrap">
           <div class="code-editor-toolbar">
-            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-              <select id="select-code-preset" class="btn" style="padding:4px 8px; font-size:0.75rem;" aria-label="Motion Presets">
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+              <select id="select-code-preset" class="btn" style="padding:4px 8px; font-size:0.75rem; width:auto;" aria-label="Motion Presets">
                 <option value="drunken_sailor" selected>Preset 1: Drunken Sailor Wobble</option>
                 <option value="tof_beatbox">Preset 2: ToF Theremin Beatbox</option>
                 <option value="self_righting">Preset 3: Self-Righting Acrobat</option>
                 <option value="laser_chase">Preset 4: Laser Dot Tracking</option>
                 <option value="python_style">Python: Waddle &amp; Quack</option>
               </select>
-              <button id="btn-load-preset" class="btn btn-cyan" style="padding:4px 10px; font-size:0.75rem;" type="button">Load Preset</button>
+              <button id="btn-load-preset" class="btn btn-cyan" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;" type="button">Load Preset</button>
             </div>
             <div style="display:flex; gap:6px;">
               <button id="btn-run-code" class="btn btn-primary" style="padding:5px 14px; font-weight:600;" type="button">▶ Run Script</button>
@@ -253,7 +253,7 @@
 
       <article class="card" data-info="subsys-obs61">
         <div class="card-header">
-          <h2>Live 61-D Policy Observation Vector (`obs[1,61]`)</h2>
+          <h2>Live 61-D Policy Observation Vector (<code>obs[1,61]</code>)</h2>
           <span class="mono-tag">duck-control/src/obs.rs</span>
         </div>
         <canvas id="obs-canvas" class="obs-canvas" width="760" height="76"></canvas>
@@ -269,7 +269,7 @@
 
       <article class="card">
         <div class="card-header">
-          <h2>JSON-RPC Event &amp; Journal Log (`robotd` / `autod` / `updaterd`)</h2>
+          <h2>JSON-RPC Event &amp; Journal Log (<code>robotd</code> / <code>autod</code> / <code>updaterd</code>)</h2>
           <span class="mono-tag">NDJSON Unix IPC</span>
         </div>
         <div id="log-feed" class="log-feed"></div>
@@ -436,6 +436,6 @@
     </div>
   </div>
 
-  <script src="simulator.js?v=0.3.6"></script>
+  <script src="simulator.js?v=0.3.7"></script>
 </body>
 </html>
