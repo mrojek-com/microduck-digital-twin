@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "microduck-digital-twin"
+version = "0.4.0"
+description = "50 Hz Digital Twin, Safety Verification Suite, and WebGL 3D Simulator for the 15-DOF MicroDuck bipedal robot"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+assets = [
+    "numpy>=1.24",
+    "trimesh>=4.0",
+]
+dev = [
+    "pytest>=7.4",
+    "numpy>=1.24",
+    "trimesh>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v"

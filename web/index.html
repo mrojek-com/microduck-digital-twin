@@ -10,6 +10,7 @@
   <script src="vendor/three.min.js"></script>
   <script src="vendor/GLTFLoader.js"></script>
   <script src="vendor/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -163,8 +164,10 @@
               <button id="btn-mode-autod" class="hud-chip" data-info="subsys-autod" type="button">autod Brain</button>
               <button id="btn-mode-laser" class="hud-chip" data-info="subsys-laser" type="button">Laser Chase</button>
               <button id="btn-mode-soccer" class="hud-chip" data-info="subsys-soccer" type="button">Auto Soccer</button>
+              <button id="btn-toggle-onnx" class="hud-chip" data-info="subsys-onnx" type="button">Policy: Analytical CPG</button>
             </div>
             <div class="hud-chip-group">
+              <span id="hud-gamepad-status" class="hud-chip" data-info="subsys-gamepad" title="Connect an Xbox/PS/8BitDo controller">Pad: None</span>
               <button id="btn-cam-follow" class="hud-chip active" data-info="subsys-viewport" type="button">Follow Cam</button>
             </div>
           </div>

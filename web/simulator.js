@@ -153,6 +153,25 @@
       watchVars: {},
     },
 
+    onnx: {
+      enabled: false,
+      loading: false,
+      ready: false,
+      activeSlot: "walk",
+      sessions: {},
+      lstmState: {},
+      lastAction14: new Float32Array(14),
+      inFlight: false,
+      lastLatencyMs: 0,
+      error: null,
+    },
+
+    gamepad: {
+      connected: false,
+      name: "",
+      prevButtons: [],
+    },
+
     activeSkill: null, // { name, elapsed, duration }
     activeEmotion: null, // { name, keyframes, elapsed, duration }
 
@@ -1823,8 +1842,216 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 7b. Real Browser ONNX Runtime Web Inference (`velstand.onnx`, `BEST_roller.onnx`)
+  //     & HTML5 Gamepad API (`padd` stick curves + asymmetric roller preset)
+  // ---------------------------------------------------------------------------
+  const ONNX_POLICY_SPECS = {
+    walk: { url: "assets/policies/velstand.onnx", actionScale: 0.25, label: "velstand.onnx" },
+    roller: { url: "assets/policies/BEST_roller.onnx", actionScale: 0.80, label: "BEST_roller.onnx" },
+    roller_crouch: { url: "assets/policies/BEST_roller_crouch.onnx", actionScale: 0.80, label: "BEST_roller_crouch.onnx" },
+  };
+
+  function updateOnnxHudChip() {
+    const btn = document.getElementById("btn-toggle-onnx");
+    if (!btn) return;
+    if (!state.onnx.enabled) {
+      btn.classList.remove("active");
+      btn.textContent = "Policy: Analytical CPG";
+      return;
+    }
+    btn.classList.add("active");
+    if (state.onnx.loading) {
+      btn.textContent = "Policy: Loading ONNX…";
+    } else if (state.onnx.ready) {
+      const ms = state.onnx.lastLatencyMs > 0 ? ` · ${state.onnx.lastLatencyMs.toFixed(1)}ms` : "";
+      btn.textContent = `Policy: ONNX (${state.onnx.activeSlot}${ms})`;
+    } else {
+      btn.textContent = "Policy: ONNX Fallback (CPG)";
+    }
+  }
+
+  async function loadOnnxPolicySlot(slot) {
+    const spec = ONNX_POLICY_SPECS[slot] || ONNX_POLICY_SPECS.walk;
+    if (typeof window.ort === "undefined" || !window.ort.InferenceSession) {
+      state.onnx.ready = false;
+      state.onnx.error = "onnxruntime-web unavailable (offline?) — using Analytical CPG";
+      updateOnnxHudChip();
+      return false;
+    }
+    if (state.onnx.sessions[slot]) {
+      state.onnx.activeSlot = slot;
+      state.onnx.ready = true;
+      state.onnx.error = null;
+      updateOnnxHudChip();
+      return true;
+    }
+    state.onnx.loading = true;
+    updateOnnxHudChip();
+    try {
+      const session = await window.ort.InferenceSession.create(spec.url, {
+        executionProviders: ["wasm"],
+        graphOptimizationLevel: "all",
+      });
+      state.onnx.sessions[slot] = { session, spec };
+      // Initialize LSTM hidden/cell states if exported with recurrent inputs
+      if (session.inputNames.includes("h_in") && session.inputNames.includes("c_in")) {
+        const metaH = session.inputMetadata?.find?.((m) => m.name === "h_in");
+        const dims = (metaH && Array.isArray(metaH.shape) && metaH.shape.length === 3)
+          ? metaH.shape.map((d) => (typeof d === "number" && d > 0 ? d : 1))
+          : [1, 1, 256];
+        const sz = dims[0] * dims[1] * dims[2];
+        state.onnx.lstmState[slot] = {
+          h: new window.ort.Tensor("float32", new Float32Array(sz), dims),
+          c: new window.ort.Tensor("float32", new Float32Array(sz), dims),
+        };
+      }
+      state.onnx.activeSlot = slot;
+      state.onnx.ready = true;
+      state.onnx.error = null;
+      pushLog("onnx", `Loaded ${spec.label} (inputs: ${session.inputNames.join(", ")}) -> live 50 Hz WASM inference.`);
+      return true;
+    } catch (err) {
+      state.onnx.ready = false;
+      state.onnx.error = String(err && err.message ? err.message : err);
+      pushLog("onnx", `ONNX load fallback (${spec.label}): ${state.onnx.error}`);
+      return false;
+    } finally {
+      state.onnx.loading = false;
+      updateOnnxHudChip();
+    }
+  }
+
+  function stepOnnxInference(obs61) {
+    if (!state.onnx.enabled || !state.onnx.ready || state.onnx.inFlight) return;
+    const slot = state.locomotionMode === "roller" ? "roller" : "walk";
+    if (!state.onnx.sessions[slot]) {
+      if (!state.onnx.loading) loadOnnxPolicySlot(slot);
+      return;
+    }
+    state.onnx.activeSlot = slot;
+    const entry = state.onnx.sessions[slot];
+    const { session, spec } = entry;
+    state.onnx.inFlight = true;
+    const t0 = performance.now();
+    const obsTensor = new window.ort.Tensor("float32", Float32Array.from(obs61), [1, 61]);
+    const feeds = { [session.inputNames[0]]: obsTensor };
+    const lstm = state.onnx.lstmState[slot];
+    if (lstm && session.inputNames.includes("h_in") && session.inputNames.includes("c_in")) {
+      feeds.h_in = lstm.h;
+      feeds.c_in = lstm.c;
+    }
+    session.run(feeds).then((results) => {
+      const outName = session.outputNames[0];
+      const outData = results[outName]?.data;
+      if (outData && outData.length >= 14) {
+        let allFinite = true;
+        for (let i = 0; i < 14; i++) {
+          if (!Number.isFinite(outData[i])) {
+            allFinite = false;
+            break;
+          }
+        }
+        if (allFinite) {
+          for (let i = 0; i < 14; i++) {
+            const scaled = Math.max(-1.6, Math.min(1.6, outData[i] * spec.actionScale));
+            state.onnx.lastAction14[i] = scaled;
+          }
+        }
+      }
+      if (lstm && results.h_out && results.c_out) {
+        lstm.h = results.h_out;
+        lstm.c = results.c_out;
+      }
+      state.onnx.lastLatencyMs = performance.now() - t0;
+    }).catch((err) => {
+      state.onnx.error = String(err && err.message ? err.message : err);
+    }).finally(() => {
+      state.onnx.inFlight = false;
+    });
+  }
+
+  function applyPadCurve(raw, deadzone = 0.12) {
+    if (!Number.isFinite(raw) || Math.abs(raw) < deadzone) return 0;
+    const sign = Math.sign(raw);
+    const norm = (Math.abs(raw) - deadzone) / (1 - deadzone);
+    // Cubic-blended response curve matching `padd/src/main.rs` fine stick control
+    return sign * (0.35 * norm + 0.65 * norm * norm * norm);
+  }
+
+  function pollHardwareGamepad() {
+    if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") return;
+    const pads = navigator.getGamepads();
+    let pad = null;
+    for (let i = 0; i < pads.length; i++) {
+      if (pads[i] && pads[i].connected) {
+        pad = pads[i];
+        break;
+      }
+    }
+    const hudPad = document.getElementById("hud-gamepad-status");
+    if (!pad) {
+      if (state.gamepad.connected) {
+        state.gamepad.connected = false;
+        state.gamepad.name = "";
+        if (hudPad) {
+          hudPad.classList.remove("active");
+          hudPad.textContent = "Pad: None";
+        }
+        pushLog("padd", "Hardware Gamepad disconnected -> deadman zeroing sticks.");
+      }
+      return;
+    }
+    if (!state.gamepad.connected) {
+      state.gamepad.connected = true;
+      state.gamepad.name = (pad.id || "Gamepad").slice(0, 22);
+      state.gamepad.prevButtons = pad.buttons.map((b) => Boolean(b.pressed));
+      if (hudPad) {
+        hudPad.classList.add("active");
+        hudPad.textContent = `Pad: ${state.gamepad.name}`;
+      }
+      pushLog("padd", `Hardware Gamepad connected: ${pad.id}`);
+    }
+
+    // Standard Gamepad layout: axes[0]=LX, axes[1]=LY, axes[2]=RX, axes[3]=RY
+    const lx = applyPadCurve(pad.axes[0] || 0);
+    const ly = applyPadCurve(-(pad.axes[1] || 0)); // Push stick forward = +vx
+    const rx = applyPadCurve(pad.axes[2] || 0);
+    const ry = applyPadCurve(-(pad.axes[3] || 0));
+
+    const isRoller = state.locomotionMode === "roller";
+    // Official `padd/src/main.rs` roller preset: asymmetric +0.60 / -0.50 m/s, no strafe, ±0.30 rad/s
+    const vx = isRoller
+      ? (ly >= 0 ? ly * 0.60 : ly * 0.50)
+      : (ly >= 0 ? ly * 0.45 : ly * 0.30);
+    const vy = isRoller ? 0 : -lx * 0.25;
+    const vyaw = isRoller ? -rx * 0.30 : -rx * 1.20;
+
+    if (Math.abs(vx) > 0.001 || Math.abs(vy) > 0.001 || Math.abs(vyaw) > 0.001) {
+      state.brainMode = "manual";
+    }
+    state.cmd.vx = vx;
+    state.cmd.vy = vy;
+    state.cmd.vyaw = vyaw;
+    if (Math.abs(ry) > 0.001) {
+      state.cmd.headPitch = Math.max(-0.5, Math.min(0.5, ry * 0.45));
+    }
+
+    // Rising-edge button triggers (A=0 Sit/Stand, B=1 Pick/Crouch, X=2 Quack, Y=3 Kick, LB=4 Walk, RB=5 Roller)
+    const pressed = (idx) => Boolean(pad.buttons[idx]?.pressed);
+    const rising = (idx) => pressed(idx) && !state.gamepad.prevButtons[idx];
+    if (rising(0)) triggerSkill("sit_toggle");
+    if (rising(1)) triggerSkill(isRoller ? "roller_crouch" : "ground_pick");
+    if (rising(2)) playProceduralQuack(1.0);
+    if (rising(3)) triggerSkill("kick_left");
+    if (rising(4)) triggerSkill("walk");
+    if (rising(5)) triggerSkill("roller");
+    state.gamepad.prevButtons = pad.buttons.map((b) => Boolean(b.pressed));
+  }
+
   function stepSimulation(dt) {
     state.time += dt;
+    pollHardwareGamepad();
     updateAutonomousBrain(dt);
 
     // Ball physics
@@ -1850,6 +2077,9 @@
         state.customScript.execMs = elapsedMs;
         if (elapsedMs > state.customScript.maxExecMs) {
           state.customScript.maxExecMs = elapsedMs;
+        }
+        if (elapsedMs > 12.0) {
+          throw new Error(`Watchdog timeout: tick took ${elapsedMs.toFixed(1)} ms (> 12.0 ms safety ceiling).`);
         }
         if (ret && typeof ret === "object") {
           for (const [k, v] of Object.entries(ret)) {
@@ -2010,6 +2240,14 @@
         action14[11] = 0.38;
         action14[12] = -0.76;
         action14[13] = -1.14;
+      }
+
+      // Optional live browser ONNX Runtime Web neural policy override (`velstand.onnx` / `BEST_roller.onnx`)
+      if (state.onnx.enabled && state.onnx.ready && !state.isSeated && !state.activeSkill) {
+        stepOnnxInference(state.obs61);
+        for (let i = 0; i < 14; i++) {
+          action14[i] = state.onnx.lastAction14[i];
+        }
       }
 
       // Active one-shot skill overlay (Claude Endgegner Physics-Grounded Kinematics)
@@ -2625,6 +2863,20 @@
     btnToggleTofRays.classList.toggle("active", state.showTofRays);
   });
 
+  const btnToggleOnnx = document.getElementById("btn-toggle-onnx");
+  if (btnToggleOnnx) {
+    btnToggleOnnx.addEventListener("click", async () => {
+      state.onnx.enabled = !state.onnx.enabled;
+      if (state.onnx.enabled) {
+        const slot = state.locomotionMode === "roller" ? "roller" : "walk";
+        await loadOnnxPolicySlot(slot);
+      } else {
+        updateOnnxHudChip();
+        pushLog("onnx", "Switched back to Analytical CPG fallback.");
+      }
+    });
+  }
+
   btnCamFollow.addEventListener("click", () => {
     state.followCam = !state.followCam;
     btnCamFollow.classList.toggle("active", state.followCam);
@@ -2945,14 +3197,27 @@ def on_step(t, dt, duck):
     duckApi.reset();
     const executableCode = transpilePythonToJs(rawCode);
 
+    // Static sandbox guard: reject unbounded loops and forbidden DOM/network escapes
+    if (/\bwhile\s*\(\s*(?:true|1)\s*\)|\bfor\s*\(\s*;\s*;\s*\)/.test(executableCode)) {
+      throw new Error("Sandbox blocked unbounded loop (while(true) / for(;;)) to protect the 50 Hz UI thread.");
+    }
+
     try {
-      const factory = new Function("duck", "console", "Math", `
-        ${executableCode}
-        if (typeof onStep === "function") return onStep;
-        if (typeof on_step === "function") return on_step;
-        return null;
-      `);
-      const stepFn = factory(duckApi, console, Math);
+      // Shadow browser/network globals so user controllers can only interact with the 50 Hz `duck` API
+      const factory = new Function(
+        "duck", "console", "Math",
+        "window", "document", "globalThis", "self", "fetch", "XMLHttpRequest", "WebSocket",
+        "localStorage", "sessionStorage", "indexedDB", "importScripts",
+        `"use strict";\n${executableCode}\n` +
+        `if (typeof onStep === "function") return onStep;\n` +
+        `if (typeof on_step === "function") return on_step;\n` +
+        `return null;`
+      );
+      const stepFn = factory(
+        duckApi, console, Math,
+        undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined
+      );
       if (typeof stepFn !== "function") {
         throw new Error("Define 'function onStep(t, dt, duck)' (JS) or 'def on_step(t, dt, duck):' (Python).");
       }
@@ -3302,6 +3567,20 @@ function onStep(t, dt, duck) {
       title: "Bipedal Locomotion Policy (velstand.onnx)",
       text: "50 Hz neural network policy trained with PPO for stable dynamic limit-cycle walking, capturing phase transitions, contact timing, and continuous twist commands.",
       facts: ["50 Hz Loop", "PPO Policy", "Limit-Cycle Stride", "SE(3) Twist"]
+    },
+    "subsys-onnx": {
+      badge: "NEURAL WASM",
+      tone: "cyan",
+      title: "Live Browser ONNX Runtime Web Inference",
+      text: "Toggles real-time WASM neural inference over the 61-D observation vector using official policies (velstand.onnx / BEST_roller.onnx), with LSTM state tracking, NaN guards, and instant Analytical CPG fallback.",
+      facts: ["onnxruntime-web", "61-D → 14-D", "LSTM h/c State", "Zero-Glitch Fallback"]
+    },
+    "subsys-gamepad": {
+      badge: "HARDWARE PAD",
+      tone: "green",
+      title: "HTML5 Gamepad API (padd Curves)",
+      text: "Connect any Xbox, PlayStation, or 8BitDo controller. Applies official padd cubic stick curves, asymmetric roller speeds (+0.60 / -0.50 m/s), and A/B/X/Y/LB/RB triggers.",
+      facts: ["0.12 Deadzone", "Cubic Curve", "Roller Preset", "A/B/X/Y Skills"]
     },
     "subsys-roller": {
       badge: "SKATE MODE",
